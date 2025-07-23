@@ -113,7 +113,7 @@ def generate_full_sql_script():
         workout_logs, workout_plan_exercises, workout_plans, 
         user_goals, user_focus_areas, user_health_issues, user_equipment, 
         exercise_focus_areas, exercise_equipment, exercise_contraindications, exercise_fitness_levels,
-        exercises, users, routines, goals, motivations, focus_areas, health_issues, equipment,
+        exercises, users, routines, goals, motivations, user_motivations, focus_areas, health_issues, equipment,
         token_blocklist, user_login_history CASCADE;
 
     DROP TYPE IF EXISTS 
@@ -180,7 +180,7 @@ def generate_full_sql_script():
         fitness_level fitness_level_enum NOT NULL,
         activity_level activity_level_enum NOT NULL,
         workouts_per_week INTEGER CHECK (workouts_per_week >= 1 AND workouts_per_week <= 7),
-        motivation_id INTEGER REFERENCES motivations(id),
+
         account_status user_status_enum NOT NULL DEFAULT 'pending_verification',
         unit_preference unit_preference_enum NOT NULL DEFAULT 'metric',
         timezone VARCHAR(100) DEFAULT 'UTC',
@@ -194,6 +194,12 @@ def generate_full_sql_script():
         equipment VARCHAR(255),
         workout_days VARCHAR(255)
     );
+    CREATE TABLE user_motivations (
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        motivation_id INTEGER NOT NULL REFERENCES motivations(id) ON DELETE CASCADE,
+        PRIMARY KEY (user_id, motivation_id)
+    );
+
     CREATE INDEX idx_users_email ON users(email);
     CREATE TRIGGER trigger_users_updated_at
     BEFORE UPDATE ON users

@@ -33,7 +33,7 @@ async def create_user(
 
             # 2. Prepare user data, excluding all linked IDs for the main insert
             user_dict = user_data.model_dump(exclude={
-                'password', 'routine_id', 'goal_ids', 'focus_area_ids', 
+                'password', 'routine_id', 'motivation_ids', 'goal_ids', 'focus_area_ids', 
                 'health_issue_ids', 'equipment_ids', 'workout_days'
             })
             user_dict['password_hash'] = hashed_password
@@ -51,6 +51,7 @@ async def create_user(
             await db_queries.set_initial_active_routine(conn, new_user_id, user_data.routine_id)
 
             # 5. Perform efficient bulk inserts for other profile details
+            await db_queries.link_user_to_items(conn, new_user_id, user_data.motivation_ids, 'user_motivations', 'motivation_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.goal_ids, 'user_goals', 'goal_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.focus_area_ids, 'user_focus_areas', 'focus_area_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.health_issue_ids, 'user_health_issues', 'health_issue_id')
@@ -105,8 +106,11 @@ async def read_user(
 
     user_dict: Dict[str, Any] = dict(row)
 
-    if isinstance(user_dict.get('routines'), str):
-        user_dict['routines'] = json.loads(user_dict['routines'])
+    # The json_agg function in PostgreSQL returns a JSON string.
+    # We need to parse these strings into Python lists/dicts before Pydantic validation.
+    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas']:
+        if key in user_dict and isinstance(user_dict.get(key), str):
+            user_dict[key] = json.loads(user_dict[key])
         
     # Convert decimal/decimal-like numeric types to float for JSON serialization
     return user_dict

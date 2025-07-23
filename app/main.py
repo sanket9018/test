@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from . import schemas
 from .database import get_db, close_pool, get_pool
 from .apis.user import router as user_router
+from .apis.public import router as public_router
 from contextlib import asynccontextmanager
 import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -38,6 +39,7 @@ app = FastAPI(
 # Register API routers
 # Add more routers here as you create more modules inside app/apis
 app.include_router(user_router)
+app.include_router(public_router, prefix="", tags=["Public"])
 
 # CORS middleware
 app.add_middleware(
@@ -128,6 +130,9 @@ app.add_middleware(
         "/",
         "/docs",
         "/openapi.json",
+        "/motivations",
+        "/equipment",
+        "/health_issues",
     ],
 )
 

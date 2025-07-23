@@ -48,10 +48,10 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         INSERT INTO users (
             name, email, password_hash, gender, age, height_cm, 
             current_weight_kg, target_weight_kg, fitness_level, 
-            activity_level, workouts_per_week, motivation_id
+            activity_level, workouts_per_week
         ) VALUES (
             $1, $2, $3, $4::gender_enum, $5, $6, $7, $8, 
-            $9::fitness_level_enum, $10::activity_level_enum, $11, $12
+            $9::fitness_level_enum, $10::activity_level_enum, $11
         ) RETURNING id, created_at, updated_at;
     """
     return await conn.fetchrow(
@@ -66,8 +66,7 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         user_data['target_weight_kg'],
         user_data['fitness_level'], 
         user_data['activity_level'],
-        user_data['workouts_per_week'], 
-        user_data['motivation_id']
+        user_data['workouts_per_week']
     )
 
 # This function is correct and essential for the new flow.
@@ -155,7 +154,7 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
     user_goals_agg AS (
         SELECT
             ug.user_id,
-            ARRAY_AGG(g.name ORDER BY g.name) AS goals
+            json_agg(g.name ORDER BY g.name) AS goals
         FROM user_goals ug
         JOIN goals g ON g.id = ug.goal_id
         WHERE ug.user_id = $1
@@ -165,11 +164,30 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
     user_equipment_agg AS (
         SELECT
             ue.user_id,
-            ARRAY_AGG(e.name ORDER BY e.name) AS equipment
+            json_agg(e.name ORDER BY e.name) AS equipment
         FROM user_equipment ue
         JOIN equipment e ON e.id = ue.equipment_id
         WHERE ue.user_id = $1
         GROUP BY ue.user_id
+    ),
+    user_health_issues_agg AS (
+        SELECT
+            uhi.user_id,
+            json_agg(hi.name) as health_issues
+        FROM user_health_issues uhi
+        JOIN health_issues hi ON uhi.health_issue_id = hi.id
+        WHERE uhi.user_id = $1
+        GROUP BY uhi.user_id
+    ),
+    -- NEW: Pre-aggregate user motivations into an array
+    user_motivations_agg AS (
+        SELECT
+            um.user_id,
+            json_agg(m.name) as motivations
+        FROM user_motivations um
+        JOIN motivations m ON um.motivation_id = m.id
+        WHERE um.user_id = $1
+        GROUP BY um.user_id
     )
     -- FINAL SELECT: Join the main table with the pre-aggregated CTEs.
     -- No GROUP BY is needed here because each join is on a 1-to-1 basis.
@@ -185,29 +203,41 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         u.fitness_level,
         u.activity_level,
         u.workouts_per_week,
-        m.name AS motivation,
         -- Use COALESCE to gracefully handle users with no goals/equipment etc.
-        COALESCE(uga.goals, '{}') AS goals,
-        COALESCE(uea.equipment, '{}') AS equipment,
-        COALESCE(hi.name, 'None') AS health_issues,
+        COALESCE(uga.goals, '[]'::json) AS goals,
+        COALESCE(uea.equipment, '[]'::json) AS equipment,
+        COALESCE(uh.health_issues, '[]'::json) AS health_issues,
         COALESCE(urd.routines, '[]'::json) AS routines,
+        COALESCE(uma.motivations, '[]'::json) as motivations,
         u.created_at,
         u.updated_at
     FROM users u
-    LEFT JOIN motivations m ON m.id = u.motivation_id
-    LEFT JOIN user_health_issues uhi ON uhi.user_id = u.id
-    LEFT JOIN health_issues hi ON hi.id = uhi.health_issue_id
     -- Join our pre-aggregated CTEs
     LEFT JOIN user_routine_details urd ON u.id = urd.user_id
     LEFT JOIN user_goals_agg uga ON u.id = uga.user_id
     LEFT JOIN user_equipment_agg uea ON u.id = uea.user_id
+    LEFT JOIN user_health_issues_agg uh ON u.id = uh.user_id
+    LEFT JOIN user_motivations_agg uma ON u.id = uma.user_id
     WHERE u.id = $1; -- Filter for the specific user
     """
     return await conn.fetchrow(query, user_id)
 
+async def fetch_all_motivations(conn: asyncpg.Connection):
+    """Fetches all motivations from the database."""
+    return await conn.fetch("SELECT id, name FROM motivations ORDER BY id")
+
+async def fetch_all_goal(conn: asyncpg.Connection):
+    """Fetches all equipment from the database."""
+    return await conn.fetch("SELECT id, name FROM goals ORDER BY id")
+
+async def fetch_all_health_issues(conn: asyncpg.Connection):
+    """Fetches all health issues from the database."""
+    return await conn.fetch("SELECT id, name FROM health_issues ORDER BY id")
+
 
 # Add these new functions to your existing db_queries.py
 async def get_user_profile_for_workout(conn: asyncpg.Connection, user_id: int):
+
     """
     Fetches a user's complete profile needed for workout generation using IDs.
     This single query gathers all necessary information from junction tables.

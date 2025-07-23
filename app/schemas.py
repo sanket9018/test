@@ -53,7 +53,7 @@ class UserCreate(UserBase):
     fitness_level: FitnessLevelEnum = FitnessLevelEnum.beginner
     activity_level: ActivityLevelEnum = ActivityLevelEnum.moderately_active
     workouts_per_week: int = Field(3, ge=1, le=7)
-    motivation_id: Optional[int] = None
+    motivation_ids: Optional[List[int]] = None
 
 class UserOnboardingCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
@@ -72,7 +72,7 @@ class UserOnboardingCreate(BaseModel):
     # This ID specifies which of the 7 default routines should be marked as active.
     routine_id: int 
     
-    motivation_id: int
+    motivation_ids: List[int]
     goal_ids: List[int]
     focus_area_ids: List[int]
     health_issue_ids: List[int]
@@ -94,7 +94,7 @@ class UserOnboardingCreate(BaseModel):
                 "activity_level": "lightly_active",
                 "workouts_per_week": 3,
                 "routine_id": 1,  # User wants to start with "3 Day Classic"
-                "motivation_id": 1,
+                "motivation_ids": [1, 2],
                 "goal_ids": [1, 3],
                 "focus_area_ids": [1, 2, 5],
                 "health_issue_ids": [1],
@@ -138,10 +138,10 @@ class UserDetailResponse(BaseModel):
     workouts_per_week: int
     
     # Simple linked data
-    motivation: str
+    motivations: List[str]
     goals: List[str]
     equipment: List[str]
-    health_issues: str
+    health_issues: List[str]
     
     # The new, nested routine data
     routines: List[UserRoutineResponse]
@@ -164,7 +164,7 @@ class UserUpdate(BaseSchema):
     fitness_level: Optional[FitnessLevelEnum] = None
     activity_level: Optional[ActivityLevelEnum] = None
     workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
-    motivation_id: Optional[int] = None
+    motivation_ids: Optional[List[int]] = None
 
 class WorkoutGenerationRequest(BaseSchema):
     workout_days: List[DayOfWeekEnum] = Field(..., min_items=1, max_items=7)
@@ -183,7 +183,7 @@ class User(UserBase):
     fitness_level: FitnessLevelEnum = FitnessLevelEnum.beginner
     activity_level: ActivityLevelEnum = ActivityLevelEnum.moderately_active
     workouts_per_week: int = 3
-    motivation_id: Optional[int] = None
+    motivation_ids: Optional[List[int]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -254,6 +254,16 @@ class TokenData(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class UserLoginHistory(BaseModel):
+    user_id: int
+
+class ListItem(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
 
 class ExerciseResponse(BaseModel):
     """Defines the structure of a single exercise in the response."""
