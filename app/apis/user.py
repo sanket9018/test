@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional, Dict, Any
 import asyncpg
 from datetime import datetime, timedelta
-from app.schemas import ExerciseResponse, UserOnboardingCreate, UserDetailResponse, UserLogin, Token
+from app.schemas import *
 from app.database import get_db
 from app.utils import hash_password, verify_password, success_response, error_response
 from app.db import queries as db_queries
@@ -314,17 +314,6 @@ async def generate_workout_plan(
     return [dict(record) for record in recommended_exercises]
 
 
-from pydantic import BaseModel # Make sure this import is at the top
-
-# ... (keep your other imports and endpoints) ...
-
-# Define a Pydantic model for the response of our new status endpoint
-class WorkoutDayStatusResponse(BaseModel):
-    routine_name: str
-    today_day_number: int
-    total_routine_days: int
-    focus_areas_for_today: List[str]
-
 @router.get("/me/workout/status", response_model=WorkoutDayStatusResponse)
 async def get_current_workout_day_status(
     request: Request,
@@ -352,3 +341,288 @@ async def get_current_workout_day_status(
         )
         
     return dict(status_record)
+
+
+@router.put("/user/me/active-routine", status_code=200)
+async def update_user_active_routine(
+    routine_update: UserRoutineUpdate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Updates the authenticated user's active routine.
+
+    This operation is fully atomic. If the provided routine_id is invalid
+    for the user, an error is returned and no changes are made to the database,
+    preserving the previous active routine.
+    """
+    # Step 1: Get the authenticated user's ID
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # Step 2: Use a transaction to ensure the entire operation is atomic (all or nothing)
+    try:
+        async with conn.transaction():
+            # The new query function performs the safe, two-step update
+            success = await db_queries.update_active_routine(conn, user_id, routine_update.routine_id)
+
+            # If the update failed, it means the routine_id was invalid.
+            # Raising an exception here will automatically trigger the transaction
+            # to be ROLLED BACK, undoing any changes.
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Routine with ID {routine_update.routine_id} not found or not assigned to this user."
+                )
+    except HTTPException as http_exc:
+        # Re-raise the specific HTTP exception to be handled by FastAPI
+        raise http_exc
+    except Exception as e:
+        # Catch any other unexpected database errors during the transaction
+        return error_response(message=f"An unexpected database error occurred: {str(e)}", status_code=500)
+
+    # Step 3: If the code reaches here, the transaction was committed successfully.
+    # Note: A PUT request that modifies an existing resource should return 200 (OK).
+    # 201 (Created) is for creating a new resource.
+    return success_response(data={}, message="Active routine updated successfully.", status_code=200)
+
+
+
+@router.get("/user/me/routines", response_model=List[UserRoutineInfo])
+async def list_user_routines(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Fetches a list of all available routines for the authenticated user.
+
+    This endpoint is useful for front-end clients that need to display a list
+    of routines from which the user can select a new active plan.
+    """
+    # 1. Authenticate the user and get their ID
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    
+    user_id = token_entry['user_id']
+
+    # 2. Fetch the list of routines from the database
+    routines_records = await db_queries.get_user_routines_list(conn, user_id)
+
+    if not routines_records:
+        # This case is unlikely due to the trigger, but good practice to handle.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No routines found for this user."
+        )
+
+    # 3. Format and return the response
+    # The response_model will automatically handle converting the list of records
+    # into a list of JSON objects matching the UserRoutineInfo schema.
+    return [dict(record) for record in routines_records]
+
+
+@router.patch("/user/me/active-day", status_code=200)
+async def update_user_active_day(
+    day_update: UserActiveDayUpdate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Manually sets the active day for the user's current workout routine.
+
+    This allows a user to override the automatic day cycle and choose which
+    day of their routine they want to perform, which will then be used for
+    generating exercise recommendations.
+    """
+    # 1. Authenticate the user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # 2. Perform the update using our new query
+    success = await db_queries.set_active_day_for_user(conn, user_id, day_update.day_number)
+
+    # 3. Handle failure
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to set day {day_update.day_number}. It may not be a valid day number for your currently active routine."
+        )
+
+    # 4. Return a success response
+    return success_response({}, message=f"Successfully set active workout to Day {day_update.day_number}", status_code=201)
+
+
+
+@router.get("/user/me/active-routine/days", response_model=ActiveRoutineDaysResponse)
+async def get_active_routine_days_list(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Fetches the details of the user's currently active routine.
+
+    This includes a list of all days within that routine, their respective
+    focus areas, and a flag indicating which day is considered the current
+    workout day.
+    """
+    # 1. Authenticate the user and get their ID
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # 2. Fetch the active routine details from the database
+    routine_details_record = await db_queries.get_active_routine_days(conn, user_id)
+
+    if not routine_details_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active routine with assigned days found for this user."
+        )
+
+    # 3. The record is already structured correctly by the SQL query.
+    # We just need to convert it to a dictionary for the response model.
+    # The 'days' field is already a JSON string, which Pydantic will parse.
+    response_data = dict(routine_details_record)
+
+    # Ensure the 'days' JSON from the DB is parsed into a Python list
+    if isinstance(response_data.get('days'), str):
+        response_data['days'] = json.loads(response_data['days'])
+
+    return response_data
+
+
+@router.get("/focus-areas", response_model=List[FocusAreaInfo])
+async def list_all_focus_areas(conn: asyncpg.Connection = Depends(get_db)):
+    """
+    Provides a complete list of all possible focus areas (e.g., muscle groups)
+    available in the system.
+
+    This is a public endpoint designed to provide a list of options for a
+    front-end UI, such as in a dropdown or multi-select component when a
+    user is customizing their routine.
+    """
+    focus_areas_records = await db_queries.get_all_focus_areas(conn)
+    # The response_model will automatically handle the conversion
+    # from a list of database records to a list of JSON objects.
+    return [dict(record) for record in focus_areas_records]
+
+
+@router.post("/user/me/routines/{user_routine_id}/days", response_model=UserRoutineDayResponse, status_code=201)
+async def create_day_in_routine(
+    user_routine_id: int,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Adds a new day to one of the user's specific routines.
+    The day is created with the next available day_number and has no focus areas by default.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    new_day = await db_queries.add_day_to_user_routine(conn, user_id, user_routine_id)
+
+    if not new_day:
+        raise HTTPException(status_code=404, detail=f"Routine with ID {user_routine_id} not found for this user.")
+
+    # Create the response object, starting with an empty list of focus areas
+    response_data = dict(new_day)
+    response_data['focus_areas'] = []
+    return response_data
+
+
+@router.delete("/user/me/routines/{user_routine_id}/days/{day_number}", status_code=204)
+async def remove_day_from_routine(
+    user_routine_id: int,
+    day_number: int,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Deletes a specific day from a user's routine.
+    This will also automatically remove all focus areas assigned to that day.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    success = await db_queries.delete_day_from_user_routine(conn, user_id, user_routine_id, day_number)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Day {day_number} not found in routine {user_routine_id} for this user.")
+
+    # A 204 response has no body, so we return None
+    return None
+
+
+# --- API for Managing Focus Areas in a Routine Day ---
+
+@router.post("/user/me/routines/{user_routine_id}/days/{day_number}/focus-areas", status_code=201)
+async def add_focus_area_to_routine_day(
+    user_routine_id: int,
+    day_number: int,
+    payload: DayFocusAreaRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Assigns a focus area to a specific day within a user's routine.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    try:
+        success = await db_queries.add_focus_area_to_day(conn, user_id, user_routine_id, day_number, payload.focus_area_id)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Routine {user_routine_id} or Day {day_number} not found for this user.")
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(status_code=400, detail=f"Focus area with ID {payload.focus_area_id} does not exist.")
+
+    return success_response(data={}, message="Focus area added successfully.", status_code=201)
+
+
+@router.delete("/user/me/routines/{user_routine_id}/days/{day_number}/focus-areas/{focus_area_id}", status_code=204)
+async def remove_focus_area_from_routine_day(
+    user_routine_id: int,
+    day_number: int,
+    focus_area_id: int,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Removes a focus area assignment from a specific day in a user's routine.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    success = await db_queries.delete_focus_area_from_day(conn, user_id, user_routine_id, day_number, focus_area_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Focus area assignment not found for the specified day and routine.")
+
+    # A 204 response has no body
+    return None

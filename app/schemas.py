@@ -262,3 +262,71 @@ class ExerciseResponse(BaseModel):
     description: Optional[str] = None
     video_url: Optional[str] = Field(None, alias="videoUrl")
     primary_focus_area: str
+
+from pydantic import BaseModel
+
+class UserRoutineUpdate(BaseModel):
+    routine_id: int
+
+class UserRoutineInfo(BaseModel):
+    """
+    Provides concise information about a single routine available to a user.
+    """
+    routine_id: int
+    name: str
+    is_active: bool
+
+# You might also create a specific response model for clarity
+class UserRoutinesListResponse(BaseModel):
+    routines: List[UserRoutineInfo]
+    
+
+class UserActiveDayUpdate(BaseModel):
+    """
+    Schema for updating the user-selected active day for their current routine.
+    """
+    day_number: int
+
+
+# Define a Pydantic model for the response of our new status endpoint
+class WorkoutDayStatusResponse(BaseModel):
+    routine_name: str
+    today_day_number: int
+    total_routine_days: int
+    focus_areas_for_today: List[str]
+
+
+
+class FocusAreaInfo(BaseModel):
+    id: int
+    name: str
+
+# Define the structure for a single day in the active routine
+class RoutineDayDetail(BaseModel):
+    day_number: int
+    is_current_day: bool  # True if this is the currently calculated workout day
+    focus_areas: List[FocusAreaInfo]
+
+# Define the final response model for the new endpoint
+class ActiveRoutineDaysResponse(BaseModel):
+    routine_id: int
+    routine_name: str
+    days: List[RoutineDayDetail]
+
+
+class FocusAreaInfo(BaseModel):
+    id: int
+    name: str
+
+class DayFocusAreaRequest(BaseModel):
+    """
+    Schema for the request body when adding a focus area to a routine day.
+    """
+    focus_area_id: int = Field(..., gt=0, description="The ID of the focus area to add.")
+
+# We can also add a response model for clarity when a new day is created
+class UserRoutineDayResponse(BaseModel):
+    id: int
+    user_routine_id: int
+    day_number: int
+    focus_areas: List[FocusAreaInfo] # Re-using the schema from the previous step

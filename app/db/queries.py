@@ -375,16 +375,16 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
     """
     Fetches all data needed for workout generation in a single, efficient query.
 
-    This determines the user's current workout day based on a cyclical calculation
-    since their registration date, making it independent of the day of the week.
+    MODIFIED: This now prioritizes the user-selected 'current_day_number'
+    if it exists, falling back to the cyclical calculation otherwise.
     """
     query = """
     WITH UserBaseProfile AS (
-        -- Step 1: Get the user's static profile information.
+        -- Step 1: Get the user's static profile information. (No change here)
         SELECT
             u.id AS user_id,
             u.fitness_level,
-            u.created_at, -- Needed to calculate the workout day cycle
+            u.created_at,
             COALESCE(ARRAY_AGG(DISTINCT ue.equipment_id) FILTER (WHERE ue.equipment_id IS NOT NULL), '{}'::int[]) AS equipment_ids,
             COALESCE(ARRAY_AGG(DISTINCT uhi.health_issue_id) FILTER (WHERE uhi.health_issue_id IS NOT NULL), '{}'::int[]) AS health_issue_ids
         FROM users u
@@ -394,27 +394,30 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         GROUP BY u.id
     ),
     ActiveRoutineInfo AS (
-        -- Step 2: Find the user's active routine and count the number of days in it.
+        -- Step 2: Find the active routine, its day count, AND the manually set day. (MODIFIED)
         SELECT
             ur.id as user_routine_id,
+            ur.current_day_number, -- <<< GET THE MANUALLY SET DAY
             COUNT(urd.id) AS total_routine_days
         FROM user_routines ur
         JOIN user_routine_days urd ON ur.id = urd.user_routine_id
         WHERE ur.user_id = $1 AND ur.is_active = TRUE
         GROUP BY ur.id
-        HAVING COUNT(urd.id) > 0 -- Ensure routine has at least one day.
+        HAVING COUNT(urd.id) > 0
     ),
     CurrentWorkoutDay AS (
-        -- Step 3: Calculate which day of the routine cycle it is today.
+        -- Step 3: Calculate which day of the routine cycle it is today. (MODIFIED)
         SELECT
             ari.user_routine_id,
-            -- Formula: (days_since_creation % total_days_in_routine) + 1
-            -- This creates a cycle like Day 1, Day 2, Day 3, Day 1, Day 2, ...
-            (EXTRACT(DAY FROM (NOW() - ubp.created_at))::int % ari.total_routine_days) + 1 AS today_day_number
+            -- Use the stored day if not NULL, otherwise calculate it.
+            COALESCE(
+                ari.current_day_number,
+                (EXTRACT(DAY FROM (NOW() - ubp.created_at))::int % ari.total_routine_days) + 1
+            ) AS today_day_number
         FROM UserBaseProfile ubp, ActiveRoutineInfo ari
     ),
     TodayFocusAreas AS (
-        -- Step 4: Get the focus areas for today's calculated workout day.
+        -- Step 4: Get the focus areas for today's workout day. (No change here)
         SELECT
             cwd.user_routine_id,
             ARRAY_AGG(urdfa.focus_area_id) as focus_area_ids
@@ -423,14 +426,13 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
         GROUP BY cwd.user_routine_id
     )
-    -- Final Step: Combine the base profile with the focus areas for today.
+    -- Final Step: Combine the profile with the focus areas for today. (No change here)
     SELECT
         ubp.fitness_level,
         ubp.equipment_ids,
         ubp.health_issue_ids,
         tfa.focus_area_ids
     FROM UserBaseProfile ubp
-    -- LEFT JOIN to gracefully handle cases where no active routine is found.
     LEFT JOIN TodayFocusAreas tfa ON 1=1
     WHERE ubp.user_id = $1;
     """
@@ -439,16 +441,16 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
 
 async def get_workout_day_status(conn: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
     """
-    Fetches a human-readable status of the user's workout plan for today,
-    including active routine, today's calculated day number, and its focus areas.
+    MODIFIED: Fetches status, prioritizing the user-set 'current_day_number'.
     """
     query = """
     WITH ActiveRoutineInfo AS (
-        -- Find the user's active routine and count its days.
+        -- Find the active routine and get the manually set day. (MODIFIED)
         SELECT
             ur.id as user_routine_id,
             r.name as routine_name,
             u.created_at,
+            ur.current_day_number, -- <<< GET THE MANUALLY SET DAY
             COUNT(urd.id) AS total_routine_days
         FROM users u
         JOIN user_routines ur ON u.id = ur.user_id
@@ -459,16 +461,19 @@ async def get_workout_day_status(conn: asyncpg.Connection, user_id: int) -> Opti
         HAVING COUNT(urd.id) > 0
     ),
     CurrentWorkoutDay AS (
-        -- Calculate which day of the routine cycle it is today.
+        -- Calculate the active day. (MODIFIED)
         SELECT
             ari.user_routine_id,
             ari.routine_name,
             ari.total_routine_days,
-            -- Formula: (days_since_creation % total_days_in_routine) + 1
-            (EXTRACT(DAY FROM (NOW() - ari.created_at))::int % ari.total_routine_days) + 1 AS today_day_number
+            -- Use the stored day if not NULL, otherwise calculate it.
+            COALESCE(
+                ari.current_day_number,
+                (EXTRACT(DAY FROM (NOW() - ari.created_at))::int % ari.total_routine_days) + 1
+            ) AS today_day_number
         FROM ActiveRoutineInfo ari
     )
-    -- Get the focus areas for today's calculated workout day and return all info.
+    -- Get focus areas for the determined day. (No change here)
     SELECT
         cwd.routine_name,
         cwd.today_day_number,
@@ -483,3 +488,292 @@ async def get_workout_day_status(conn: asyncpg.Connection, user_id: int) -> Opti
     return await conn.fetchrow(query, user_id)
 
 
+async def update_active_routine(conn: asyncpg.Connection, user_id: int, routine_id: int) -> bool:
+    """
+    Safely updates the user's active routine within a transaction.
+
+    This function is designed to be called from an existing database transaction.
+    It performs a two-step update to ensure atomicity:
+    1. Deactivates all routines for the user.
+    2. Activates only the specific routine requested.
+
+    If the requested routine_id does not exist for the user, the second step
+    will fail to update any rows, the function will return False, and the calling
+    transaction should be rolled back.
+
+    Args:
+        conn: The database connection (which must be in a transaction).
+        user_id: The ID of the user whose routine is being updated.
+        routine_id: The ID of the routine to set as active.
+
+    Returns:
+        True if the specific routine was found and activated, False otherwise.
+    """
+    # Step 1: Deactivate all of the user's routines first.
+    # This is safe because it's inside a transaction that will be rolled back on failure.
+    await conn.execute(
+        "UPDATE user_routines SET is_active = FALSE WHERE user_id = $1",
+        user_id
+    )
+
+    # Step 2: Attempt to activate ONLY the specified routine.
+    # The `RETURNING id` clause is crucial. If no row is updated (because the
+    # user_id/routine_id combination doesn't exist), this will return None.
+    result = await conn.fetchval(
+        """
+        UPDATE user_routines
+        SET is_active = TRUE
+        WHERE user_id = $1 AND routine_id = $2
+        RETURNING id;
+        """,
+        user_id,
+        routine_id
+    )
+
+    # Return True if a row was successfully updated, False otherwise.
+    return result is not None
+    
+
+async def get_user_routines_list(conn: asyncpg.Connection, user_id: int) -> List[asyncpg.Record]:
+    """
+    Fetches a list of all routines assigned to a user, including their names
+    and active status.
+    """
+    query = """
+    SELECT 
+        r.id AS routine_id,
+        r.name,
+        ur.is_active
+    FROM user_routines ur
+    JOIN routines r ON ur.routine_id = r.id
+    WHERE ur.user_id = $1
+    ORDER BY r.id; -- Order for a consistent response
+    """
+    return await conn.fetch(query, user_id)
+
+
+async def set_active_day_for_user(conn: asyncpg.Connection, user_id: int, day_number: int) -> bool:
+    """
+    Sets a user-selected 'current_day_number' for their active routine.
+
+    This overrides the automatic cyclical day calculation. It checks to ensure
+    the day number is valid for the user's currently active routine before updating.
+
+    Args:
+        conn: The database connection.
+        user_id: The ID of the user.
+        day_number: The day number to set as active.
+
+    Returns:
+        True if the update was successful, False otherwise (e.g., if the day
+        number was invalid for the routine).
+    """
+    query = """
+    UPDATE user_routines ur
+    SET current_day_number = $2
+    WHERE ur.user_id = $1 AND ur.is_active = TRUE
+    -- This EXISTS clause is a safeguard to prevent setting an invalid day number.
+    AND EXISTS (
+        SELECT 1
+        FROM user_routine_days urd
+        WHERE urd.user_routine_id = ur.id AND urd.day_number = $2
+    )
+    RETURNING ur.id;
+    """
+    # fetchval will return the ID on success, or None on failure.
+    result = await conn.fetchval(query, user_id, day_number)
+    return result is not None
+async def get_active_routine_days(conn: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
+    """
+    Fetches the details for the user's currently active routine, including a list
+    of ALL its days, their focus areas, and which day is currently active.
+
+    CORRECTED: This version uses LEFT JOINs to ensure that all days of a routine
+    are returned, even if they have not yet been assigned any focus areas.
+    """
+    query = """
+    WITH ActiveRoutine AS (
+        -- Step 1: Find the active routine and calculate the current day. This part is correct.
+        SELECT
+            ur.id as user_routine_id,
+            ur.routine_id,
+            r.name as routine_name,
+            COALESCE(
+                ur.current_day_number,
+                (EXTRACT(DAY FROM (NOW() - u.created_at))::int % COUNT(urd.id)) + 1
+            ) AS current_day_number
+        FROM user_routines ur
+        JOIN users u ON ur.user_id = u.id
+        JOIN routines r ON ur.routine_id = r.id
+        JOIN user_routine_days urd ON ur.id = urd.user_routine_id
+        WHERE ur.user_id = $1 AND ur.is_active = TRUE
+        GROUP BY ur.id, r.id, u.id
+        HAVING COUNT(urd.id) > 0
+    ),
+    DayFocusAreas AS (
+        -- Step 2: Pre-aggregate focus areas for each day. THIS PART IS CORRECTED.
+        SELECT
+            urd.user_routine_id,
+            urd.day_number,
+            -- Use COALESCE to turn a NULL result (no focus areas) into an empty JSON array '[]'.
+            COALESCE(
+                json_agg(
+                    json_build_object('id', fa.id, 'name', fa.name) ORDER BY fa.name
+                -- The FILTER clause is essential to prevent aggregating a [null] object.
+                ) FILTER (WHERE fa.id IS NOT NULL),
+                '[]'::json
+            ) AS focus_areas
+        FROM user_routine_days urd
+        -- Use LEFT JOIN to include days even if they have no matching focus areas.
+        LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
+        LEFT JOIN focus_areas fa ON urdfa.focus_area_id = fa.id
+        WHERE urd.user_routine_id = (SELECT user_routine_id FROM ActiveRoutine)
+        GROUP BY urd.user_routine_id, urd.day_number
+    )
+    -- Final Step: Combine the data. This part is also made more robust.
+    SELECT
+        ar.routine_id,
+        ar.routine_name,
+        -- Final COALESCE to handle the edge case where a routine might have no days.
+        COALESCE(json_agg(
+            json_build_object(
+                'day_number', dfa.day_number,
+                'is_current_day', (dfa.day_number = ar.current_day_number),
+                'focus_areas', dfa.focus_areas
+            ) ORDER BY dfa.day_number
+        ), '[]'::json) AS days
+    FROM ActiveRoutine ar
+    -- Use LEFT JOIN here as a final safeguard.
+    LEFT JOIN DayFocusAreas dfa ON ar.user_routine_id = dfa.user_routine_id
+    GROUP BY ar.routine_id, ar.routine_name;
+    """
+    return await conn.fetchrow(query, user_id)
+    
+
+async def get_all_focus_areas(conn: asyncpg.Connection) -> List[asyncpg.Record]:
+    """
+    Fetches a list of all available focus areas from the lookup table,
+    ordered alphabetically.
+    """
+    query = "SELECT id, name FROM focus_areas ORDER BY id;"
+    return await conn.fetch(query)
+
+
+async def add_day_to_user_routine(conn: asyncpg.Connection, user_id: int, user_routine_id: int) -> Optional[asyncpg.Record]:
+    """
+    Adds a new, empty day to a specific user routine.
+
+    It calculates the next available day number and creates the day. It also
+    verifies that the routine belongs to the user.
+
+    Returns:
+        The newly created user_routine_days record, or None if the routine
+        does not belong to the user.
+    """
+    query = """
+    WITH routine_info AS (
+        -- Step 1: Verify ownership and find the next day number
+        SELECT
+            ur.id as target_user_routine_id,
+            COALESCE(MAX(urd.day_number), 0) + 1 as next_day_number
+        FROM user_routines ur
+        LEFT JOIN user_routine_days urd ON ur.id = urd.user_routine_id
+        WHERE ur.user_id = $1 AND ur.id = $2
+        GROUP BY ur.id
+    ),
+    new_day AS (
+        -- Step 2: Insert the new day if the routine was found
+        INSERT INTO user_routine_days (user_routine_id, day_number)
+        SELECT target_user_routine_id, next_day_number FROM routine_info
+        RETURNING id, user_routine_id, day_number
+    )
+    -- Step 3: Return the result
+    SELECT * FROM new_day;
+    """
+    new_day_record = await conn.fetchrow(query, user_id, user_routine_id)
+    return new_day_record
+
+
+async def delete_day_from_user_routine(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int) -> bool:
+    """
+    Deletes a day (and its associated focus areas via CASCADE) from a user routine.
+
+    Verifies ownership before deleting. The CASCADE constraint on the
+    user_routine_day_focus_areas table handles cleanup.
+
+    Returns:
+        True if a day was deleted, False otherwise.
+    """
+    query = """
+    DELETE FROM user_routine_days urd
+    WHERE urd.day_number = $3
+    AND urd.user_routine_id = $2
+    -- This EXISTS clause is a robust way to verify ownership
+    AND EXISTS (
+        SELECT 1 FROM user_routines ur
+        WHERE ur.id = urd.user_routine_id
+        AND ur.user_id = $1
+    )
+    RETURNING urd.id;
+    """
+    deleted_id = await conn.fetchval(query, user_id, user_routine_id, day_number)
+    return deleted_id is not None
+
+
+# --- Day Focus Area Management ---
+
+async def add_focus_area_to_day(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int, focus_area_id: int) -> bool:
+    """
+    Adds a focus area to a specific day within a user routine.
+
+    Verifies ownership of the routine and that the day exists before adding.
+    Handles potential unique constraint violations gracefully.
+
+    Returns:
+        True on successful insertion, False otherwise.
+    """
+    query = """
+    WITH target_day AS (
+        -- Step 1: Find the specific user_routine_day_id while verifying ownership
+        SELECT urd.id
+        FROM user_routine_days urd
+        JOIN user_routines ur ON urd.user_routine_id = ur.id
+        WHERE ur.user_id = $1
+          AND ur.id = $2
+          AND urd.day_number = $3
+    )
+    -- Step 2: Insert the link if the day was found
+    INSERT INTO user_routine_day_focus_areas (user_routine_day_id, focus_area_id)
+    SELECT id, $4 FROM target_day
+    -- If the focus area is already linked, do nothing and don't raise an error
+    ON CONFLICT (user_routine_day_id, focus_area_id) DO NOTHING
+    RETURNING user_routine_day_id;
+    """
+    result = await conn.fetchval(query, user_id, user_routine_id, day_number, focus_area_id)
+    return result is not None
+
+
+async def delete_focus_area_from_day(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int, focus_area_id: int) -> bool:
+    """
+    Deletes a focus area from a specific day within a user routine.
+    Verifies ownership before deleting.
+
+    Returns:
+        True if a link was deleted, False otherwise.
+    """
+    query = """
+    DELETE FROM user_routine_day_focus_areas urdfa
+    WHERE urdfa.user_routine_day_id = (
+        -- Subquery to find the target day ID while verifying ownership
+        SELECT urd.id
+        FROM user_routine_days urd
+        JOIN user_routines ur ON urd.user_routine_id = ur.id
+        WHERE ur.user_id = $1
+          AND ur.id = $2
+          AND urd.day_number = $3
+    )
+    AND urdfa.focus_area_id = $4
+    RETURNING urdfa.user_routine_day_id;
+    """
+    deleted_id = await conn.fetchval(query, user_id, user_routine_id, day_number, focus_area_id)
+    return deleted_id is not None

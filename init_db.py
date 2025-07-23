@@ -217,6 +217,7 @@ def generate_full_sql_script():
         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         routine_id INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
         is_active BOOLEAN DEFAULT FALSE,
+        current_day_number INTEGER DEFAULT NULL,
         UNIQUE (user_id, routine_id)
     );
 
