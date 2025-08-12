@@ -76,6 +76,19 @@ def execute_sql_file(file_path, db_name):
         conn.commit()
         
         print("SQL script executed successfully and changes committed.")
+
+        # Enforce only one active routine per user
+        try:
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS unique_active_routine_per_user
+                ON user_routines(user_id)
+                WHERE is_active = TRUE;
+            """)
+            conn.commit()
+            print("Unique active routine index ensured.")
+        except Exception as e:
+            print(f"Error creating unique active routine index: {e}")
+            conn.rollback()
         return True
     except psycopg2.Error as e:
         print(f"--- SQL Execution Error ---")

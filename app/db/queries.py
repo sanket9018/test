@@ -78,6 +78,9 @@ async def set_initial_active_routine(conn: asyncpg.Connection, user_id: int, rou
     if not routine_id:
         return
         
+    # Step 1: Deactivate all routines for the user
+    await conn.execute("UPDATE user_routines SET is_active = FALSE WHERE user_id = $1", user_id)
+    # Step 2: Activate only the specified routine
     query = """
         UPDATE user_routines
         SET is_active = TRUE
@@ -198,6 +201,12 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         u.gender,
         u.age,
         u.height_cm,
+        u.randomness,
+        u.circute_training,
+        u.rapge_ranges,
+        u.duration,
+        u.rest_time,
+        u.objective,
         u.current_weight_kg,
         u.target_weight_kg,
         u.fitness_level,
@@ -657,7 +666,7 @@ async def get_active_routine_days(conn: asyncpg.Connection, user_id: int) -> Opt
         -- Use LEFT JOIN to include days even if they have no matching focus areas.
         LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
         LEFT JOIN focus_areas fa ON urdfa.focus_area_id = fa.id
-        WHERE urd.user_routine_id = (SELECT user_routine_id FROM ActiveRoutine)
+        WHERE urd.user_routine_id IN (SELECT user_routine_id FROM ActiveRoutine)
         GROUP BY urd.user_routine_id, urd.day_number
     )
     -- Final Step: Combine the data. This part is also made more robust.

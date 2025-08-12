@@ -149,6 +149,9 @@ async def update_user_profile(
         "fitness_level", "activity_level", "workouts_per_week", "is_matrix", "randomness",
         "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
     ]
+    # Ensure randomness is int if present
+    if 'randomness' in update_data and update_data['randomness'] is not None:
+        update_data['randomness'] = int(update_data['randomness'])
     main_update = {k: v for k, v in update_data.items() if k in main_fields}
     if main_update:
         set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(main_update.keys())])
@@ -176,8 +179,14 @@ async def update_user_profile(
     for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
+    # Ensure advanced profile fields are properly typed/defaulted
     user_dict['is_matrix'] = user_dict.get('is_matrix', False)
-    user_dict['randomness'] = user_dict.get('randomness', 10)
+    # Ensure randomness is always an int and never None for response model
+    val = user_dict.get('randomness', 10)
+    try:
+        user_dict['randomness'] = int(val) if val is not None else 10
+    except Exception:
+        user_dict['randomness'] = 10
     user_dict['circute_training'] = user_dict.get('circute_training', False)
     user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
     user_dict['duration'] = user_dict.get('duration', 30)
@@ -336,7 +345,7 @@ async def generate_workout_plan(
 
     # Step 2: Fetch all necessary profile data and today's focus areas in one go
     user_data = await db_queries.get_profile_for_workout_generation(db, user_id)
-    
+    print("user_data", user_data)
     if not user_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, 
