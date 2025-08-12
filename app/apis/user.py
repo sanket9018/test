@@ -113,6 +113,76 @@ async def read_user(
             user_dict[key] = json.loads(user_dict[key])
         
     # Convert decimal/decimal-like numeric types to float for JSON serialization
+
+    # Ensure new fields are present in the response (default if missing)
+    user_dict['is_matrix'] = user_dict.get('is_matrix', False)
+    user_dict['randomness'] = user_dict.get('randomness', 10)
+    user_dict['circute_training'] = user_dict.get('circute_training', False)
+    user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
+    user_dict['duration'] = user_dict.get('duration', 30)
+    user_dict['rest_time'] = user_dict.get('rest_time', 30)
+    user_dict['objective'] = user_dict.get('objective', 'Muscle growth')
+
+    return user_dict
+
+
+@router.patch("/user/me/profile", response_model=UserDetailResponse)
+async def update_user_profile(
+    payload: UserProfileUpdate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Update the authenticated user's profile details. Only provided fields will be updated.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Update main user table fields
+    main_fields = [
+        "gender", "age", "height_cm", "current_weight_kg", "target_weight_kg",
+        "fitness_level", "activity_level", "workouts_per_week", "is_matrix", "randomness",
+        "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
+    ]
+    main_update = {k: v for k, v in update_data.items() if k in main_fields}
+    if main_update:
+        set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(main_update.keys())])
+        values = list(main_update.values())
+        query = f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE id = $1"
+        await conn.execute(query, user_id, *values)
+
+    # Handle many-to-many relationships (clear + insert new links)
+    async def update_link_table(table, column, ids):
+        if ids is not None:
+            await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)
+            if ids:
+                await db_queries.link_user_to_items(conn, user_id, ids, table, column)
+
+    await update_link_table("user_motivations", "motivation_id", update_data.get("motivation_ids"))
+    await update_link_table("user_goals", "goal_id", update_data.get("goal_ids"))
+    await update_link_table("user_equipment", "equipment_id", update_data.get("equipment_ids"))
+    await update_link_table("user_health_issues", "health_issue_id", update_data.get("health_issue_ids"))
+
+    # Return updated profile
+    row = await db_queries.fetch_user_with_routines(conn, user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found after update")
+    user_dict: Dict[str, Any] = dict(row)
+    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas']:
+        if key in user_dict and isinstance(user_dict.get(key), str):
+            user_dict[key] = json.loads(user_dict[key])
+    user_dict['is_matrix'] = user_dict.get('is_matrix', False)
+    user_dict['randomness'] = user_dict.get('randomness', 10)
+    user_dict['circute_training'] = user_dict.get('circute_training', False)
+    user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
+    user_dict['duration'] = user_dict.get('duration', 30)
+    user_dict['rest_time'] = user_dict.get('rest_time', 30)
+    user_dict['objective'] = user_dict.get('objective', 'Muscle growth')
     return user_dict
 
 

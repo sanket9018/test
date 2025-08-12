@@ -1,0 +1,986 @@
+[
+  {
+    "name": "3-4 Sit-up",
+    "type": [
+      "Muscle Growth",
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The 3-4 Sit-up is a muscle growth, strength training exercise to primarily target the abs. It is designed to strengthen and define the core and abdominal muscles.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Abs"
+    ],
+    "equipment": [
+      "Bodyweight"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "45 degrees Side Bend",
+    "type": [
+      "Muscle Growth",
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The 45 degrees Side Bend is a muscle growth, strength training exercise that requires dumbbells, kettlebells, weight plate to primarily target the abs.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Abs"
+    ],
+    "equipment": [
+      "Dumbbells",
+      "Kettlebells",
+      "Weight Plate"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Air Bike",
+    "type": [
+      "Calorie Burning",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Air Bike is a calorie burning, muscle growth exercise to primarily target the abs.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Abs"
+    ],
+    "equipment": [
+      "Bodyweight"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Alternate Heel Touchers",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Alternate Heel Touchers is a muscle growth exercise to primarily target the abs.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Abs"
+    ],
+    "equipment": [
+      "Bodyweight"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Assisted Chest Dip",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Assisted Chest Dip is a strength training, muscle growth exercise that requires assisted weight machine, dip bars to primarily target the chest. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Chest"
+    ],
+    "equipment": [
+      "Assisted Weight Machine",
+      "Dip Bars"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Assisted Pull-up",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Assisted Pull-up is a strength training, muscle growth exercise that requires assisted weight machine, pull up bar to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Assisted Weight Machine",
+      "Pull Up Bar"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Assisted Triceps Dip",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Assisted Triceps Dip is a strength training, muscle growth exercise that requires assisted weight machine, dip bars to primarily target the triceps. It is an isolation exercise for the triceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Assisted Weight Machine",
+      "Dip Bars"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Alternate Biceps Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Alternate Biceps Curl is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Bench Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Bench Press is a strength training, muscle growth exercise that requires barbell, flat bench with rack to primarily target the chest. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Chest"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Bench Squat",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Bench Squat is a strength training, muscle growth exercise that requires barbell, flat bench to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Bent Over Row",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Bent Over Row is a strength training, muscle growth exercise that requires barbell to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Clean and Press",
+    "type": [
+      "Strength Training",
+      "Calorie Burning"
+    ],
+    "impact": false,
+    "desc": "The Barbell Clean and Press is a strength training, calorie burning exercise that requires barbell to primarily target the shoulders. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Shoulders"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Close Grip Bench Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Close Grip Bench Press is a strength training, muscle growth exercise that requires barbell, flat bench with rack to primarily target the triceps. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Curl is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Deadlift",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Deadlift is a strength training, muscle growth exercise that requires barbell to primarily target the back. This is a full-body compound lift that builds significant posterior chain strength.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Decline Bench Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Decline Bench Press is a strength training, muscle growth exercise that requires barbell, decline bench with rack to primarily target the chest. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Chest"
+    ],
+    "equipment": [
+      "Barbell",
+      "Decline Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Drag Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Drag Curl is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Front Raise",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Front Raise is a muscle growth exercise that requires barbell to primarily target the shoulders. It is an isolation exercise for the shoulders.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Shoulders"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Front Squat",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Front Squat is a strength training, muscle growth exercise that requires barbell, squat rack or power rack to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell",
+      "Squat Rack Or Power Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Full Squat",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Full Squat is a strength training, muscle growth exercise that requires barbell, squat rack or power rack to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell",
+      "Squat Rack Or Power Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Good Morning",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Good Morning is a strength training exercise that requires barbell, squat rack or power rack to primarily target the back.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell",
+      "Squat Rack Or Power Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Guillotine Bench Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Guillotine Bench Press is a strength training, muscle growth exercise that requires barbell, flat bench with rack to primarily target the chest. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Chest"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Hack Squat",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Hack Squat is a strength training, muscle growth exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Incline Bench Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Incline Bench Press is a strength training, muscle growth exercise that requires barbell, incline bench with rack to primarily target the chest. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Chest"
+    ],
+    "equipment": [
+      "Barbell",
+      "Incline Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Incline Row",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Incline Row is a strength training, muscle growth exercise that requires barbell, incline bench to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell",
+      "Incline Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Jefferson Squat",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Jefferson Squat is a strength training exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell JM-Bench Press",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell JM-Bench Press is a strength training exercise that requires barbell, flat bench with rack to primarily target the triceps. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench With Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Jump Squat",
+    "type": [
+      "Calorie Burning",
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Jump Squat is a calorie burning, strength training exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Lunge",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Lunge is a strength training, muscle growth exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Lying Close grip Press",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Lying Close grip Press is a strength training, muscle growth exercise that requires barbell, flat bench to primarily target the triceps. It is effective for developing upper body pushing strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Lying extension",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Lying extension is a strength training exercise that requires barbell, flat bench to primarily target the triceps. It is an isolation exercise for the triceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Lying Triceps Extension Skull Crusher",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Lying Triceps Extension Skull Crusher is a muscle growth exercise that requires barbell, flat bench to primarily target the triceps. It is an isolation exercise for the triceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell One Arm Bent over Row",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell One Arm Bent over Row is a strength training, muscle growth exercise that requires barbell, flat bench to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell",
+      "Flat Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell One Arm Side Deadlift",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell One Arm Side Deadlift is a strength training exercise that requires barbell to primarily target the back. This is a full-body compound lift that builds significant posterior chain strength.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell One Leg Squat",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell One Leg Squat is a strength training exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Overhead Squat",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Overhead Squat is a strength training exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Advanced"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Preacher Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Preacher Curl is a muscle growth exercise that requires barbell, preacher curl bench to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Preacher Curl Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Prone Incline Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Prone Incline Curl is a muscle growth exercise that requires barbell, incline bench to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Incline Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rack Pull",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rack Pull is a strength training exercise that requires barbell, squat rack or power rack to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell",
+      "Squat Rack Or Power Rack"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rear Delt Raise",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rear Delt Raise is a muscle growth exercise that requires barbell to primarily target the shoulders. It is an isolation exercise for the shoulders.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Shoulders"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rear Delt Row",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rear Delt Row is a strength training, muscle growth exercise that requires barbell to primarily target the back. It is excellent for strengthening the back and improving posture.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Back"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rear Lunge (VERSION 2)",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rear Lunge (VERSION 2) is a strength training, muscle growth exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rear Lunge",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rear Lunge is a strength training, muscle growth exercise that requires barbell to primarily target the legs. It helps in building lower body strength and stability.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Revers Wrist Curl (VERSION 2)",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Revers Wrist Curl (VERSION 2) is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Reverse Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Reverse Curl is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Reverse Preacher Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Reverse Preacher Curl is a muscle growth exercise that requires barbell, preacher curl bench to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell",
+      "Preacher Curl Bench"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Reverse Wrist Curl",
+    "type": [
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Reverse Wrist Curl is a muscle growth exercise that requires barbell to primarily target the biceps. This movement focuses on isolating and building the biceps.",
+    "difficulty_levels": [
+      "Beginner"
+    ],
+    "focus_areas": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Rollout",
+    "type": [
+      "Strength Training"
+    ],
+    "impact": false,
+    "desc": "The Barbell Rollout is a strength training exercise that requires barbell, weight plate to primarily target the abs. It is designed to strengthen and define the core and abdominal muscles.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Abs"
+    ],
+    "equipment": [
+      "Barbell",
+      "Weight Plate"
+    ],
+    "contraindications": []
+  },
+  {
+    "name": "Barbell Romanian Deadlift",
+    "type": [
+      "Strength Training",
+      "Muscle Growth"
+    ],
+    "impact": false,
+    "desc": "The Barbell Romanian Deadlift is a strength training, muscle growth exercise that requires barbell to primarily target the legs. This is a full-body compound lift that builds significant posterior chain strength.",
+    "difficulty_levels": [
+      "Intermediate"
+    ],
+    "focus_areas": [
+      "Legs"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "contraindications": []
+  },
+  {
+  "name": "Push-up",
+  "type": ["Strength Training", "Muscle Growth"],
+  "impact": false,
+  "desc": "A classic bodyweight exercise that builds chest, shoulder, and tricep strength. Keep your core tight and your body in a straight line.",
+  "difficulty_levels": ["Beginner", "Intermediate", "Advanced"],
+  "focus_areas": ["Chest", "Triceps", "Shoulders"],
+  "equipment": ["Bodyweight"],
+  "contraindications": []
+},
+{
+  "name": "Plank",
+  "type": ["Strength Training"],
+  "impact": false,
+  "desc": "An isometric core exercise that involves maintaining a position similar to a push-up for the maximum possible time to build core stability.",
+  "difficulty_levels": ["Beginner", "Intermediate", "Advanced"],
+  "focus_areas": ["Abs", "Full Body"],
+  "equipment": ["Bodyweight"],
+  "contraindications": ["Back or Hernia"]
+},
+{
+  "name": "Tricep Dips (on bench or chair)",
+  "type": ["Strength Training", "Muscle Growth"],
+  "impact": false,
+  "desc": "An effective bodyweight exercise for isolating the triceps. Can be performed using a bench, chair, or step.",
+  "difficulty_levels": ["Intermediate", "Advanced"],
+  "focus_areas": ["Triceps", "Chest", "Shoulders"],
+  "equipment": ["Bodyweight", "Chair"],
+  "contraindications": []
+},
+{
+  "name": "Decline Push-up",
+  "type": ["Strength Training", "Muscle Growth"],
+  "impact": false,
+  "desc": "A more challenging push-up variation where the feet are elevated, placing more emphasis on the upper chest and shoulders.",
+  "difficulty_levels": ["Intermediate", "Advanced"],
+  "focus_areas": ["Chest", "Shoulders", "Triceps"],
+  "equipment": ["Bodyweight"],
+  "contraindications": []
+},
+{
+  "name": "Crunches",
+  "type": ["Muscle Growth"],
+  "impact": false,
+  "desc": "A classic abdominal exercise that targets the rectus abdominis.",
+  "difficulty_levels": ["Beginner", "Intermediate"],
+  "focus_areas": ["Abs"],
+  "equipment": ["Bodyweight"],
+  "contraindications": []
+}
+]

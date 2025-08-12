@@ -145,6 +145,14 @@ class UserDetailResponse(BaseModel):
     
     # The new, nested routine data
     routines: List[UserRoutineResponse]
+    # New advanced user profile fields
+    is_matrix: bool
+    randomness: int
+    circute_training: bool
+    rapge_ranges: bool
+    duration: int
+    rest_time: int
+    objective: str
     
     created_at: datetime
     updated_at: datetime
@@ -165,6 +173,27 @@ class UserUpdate(BaseSchema):
     activity_level: Optional[ActivityLevelEnum] = None
     workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
     motivation_ids: Optional[List[int]] = None
+
+class UserProfileUpdate(BaseModel):
+    gender: Optional[GenderEnum] = None
+    age: Optional[int] = Field(None, gt=0, lt=120)
+    height_cm: Optional[float] = None
+    current_weight_kg: Optional[float] = None
+    target_weight_kg: Optional[float] = None
+    fitness_level: Optional[FitnessLevelEnum] = None
+    activity_level: Optional[ActivityLevelEnum] = None
+    workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
+    motivation_ids: Optional[List[int]] = None
+    goal_ids: Optional[List[int]] = None
+    equipment_ids: Optional[List[int]] = None
+    health_issue_ids: Optional[List[int]] = None
+    is_matrix: Optional[bool] = None
+    randomness: Optional[int] = None
+    circute_training: Optional[bool] = None
+    rapge_ranges: Optional[bool] = None
+    duration: Optional[int] = None
+    rest_time: Optional[int] = None
+    objective: Optional[str] = None
 
 class WorkoutGenerationRequest(BaseSchema):
     workout_days: List[DayOfWeekEnum] = Field(..., min_items=1, max_items=7)
