@@ -284,6 +284,8 @@ async def get_recommended_exercises(
     only once, even if it matches multiple focus areas. The final result is
     then shuffled to provide variety.
     """
+#            ROW_NUMBER() OVER(PARTITION BY edfa.focus_area_id ORDER BY RANDOM()) as rn
+
     query = """
     WITH RankedExercises AS (
         -- This CTE finds all possible exercise matches for each focus area.
@@ -293,7 +295,7 @@ async def get_recommended_exercises(
             e.description,
             e.video_url,
             fa.name as primary_focus_area,
-            ROW_NUMBER() OVER(PARTITION BY edfa.focus_area_id ORDER BY RANDOM()) as rn
+            ROW_NUMBER() OVER(PARTITION BY edfa.focus_area_id) as rn
         FROM exercises e
         JOIN exercise_focus_areas edfa ON e.id = edfa.exercise_id
         JOIN focus_areas fa ON edfa.focus_area_id = fa.id
@@ -321,9 +323,10 @@ async def get_recommended_exercises(
         WHERE rn <= $5 -- Get the top N candidates for each muscle group
         ORDER BY id, rn -- Important for DISTINCT ON to work predictably
     ) AS UniqueTopExercises
-    ORDER BY RANDOM() -- Shuffle the final, unique list
+    
     LIMIT $6;
     """
+    #ORDER BY RANDOM() -- Shuffle the final, unique list
     return await conn.fetch(
         query,
         focus_area_ids,         # $1
