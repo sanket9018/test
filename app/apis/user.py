@@ -393,8 +393,49 @@ async def generate_workout_plan(
             detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment."
         )
 
-    # Step 5: Format and return the response
-    return [dict(record) for record in recommended_exercises]
+    # Step 5: Apply randomness matrix logic
+    # randomness: 0-100, first N*(100-randomness)% fixed, rest random
+    import math, random
+    randomness = user_data.get('randomness', 50)
+    try:
+        randomness = int(randomness)
+        # Ensure randomness is within valid range (0-100)
+        randomness = max(0, min(100, randomness))
+    except Exception:
+        randomness = 50
+    total_count = len(recommended_exercises)
+    if total_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment."
+        )
+    
+    # Calculate fixed and random counts
+    # If randomness is 50%, then 50% should be random, 50% should be fixed
+    random_count = math.floor(total_count * randomness / 100)
+    fixed_count = total_count - random_count
+    
+    # Handle edge cases: ensure we have at least 1 fixed exercise if possible
+    if fixed_count == 0 and total_count > 0:
+        fixed_count = 1
+        random_count = total_count - 1
+    
+    print(f"randomness: {randomness}%, total: {total_count}, fixed: {fixed_count}, random: {random_count}")
+    
+    # Fixed: sort by id for determinism (same exercises every time)
+    fixed = sorted(recommended_exercises, key=lambda r: r['id'])[:fixed_count]
+    
+    # Random: shuffle the rest and take random_count
+    random_part = recommended_exercises.copy()
+    # Remove fixed from random_part by id
+    fixed_ids = set(r['id'] for r in fixed)
+    random_part = [r for r in random_part if r['id'] not in fixed_ids]
+    random.shuffle(random_part)
+    random_selected = random_part[:random_count]
+    
+    # Combine fixed and random exercises
+    result = fixed + random_selected
+    return [dict(record) for record in result]
 
 
 @router.get("/me/workout/status", response_model=WorkoutDayStatusResponse)
