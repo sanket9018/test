@@ -93,15 +93,27 @@ async def link_user_to_items(conn: asyncpg.Connection, user_id: int, item_ids: L
     """Performs a bulk insert to link a user to multiple items in a junction table."""
     if not item_ids:
         return
-    query = f"INSERT INTO {table_name} (user_id, {column_name}) SELECT $1, unnest($2::integer[]);"
-    await conn.execute(query, user_id, item_ids)
+
+    # Use copy_records_to_table for efficient bulk inserts.
+    records_to_insert = [(user_id, item_id) for item_id in item_ids]
+    await conn.copy_records_to_table(
+        table_name,
+        records=records_to_insert,
+        columns=('user_id', column_name),
+    )
 
 async def link_user_to_days(conn: asyncpg.Connection, user_id: int, days: List[str]):
     """Performs a bulk insert for user workout days."""
     if not days:
         return
-    query = "INSERT INTO user_workout_days (user_id, day) SELECT $1, unnest($2::text[])::day_of_week_enum;"
-    await conn.execute(query, user_id, days)
+
+    # Use copy_records_to_table for efficient bulk inserts.
+    records_to_insert = [(user_id, day) for day in days]
+    await conn.copy_records_to_table(
+        'user_workout_days',
+        records=records_to_insert,
+        columns=('user_id', 'day'),
+    )
 
 # You can add more queries as needed for other user operations.
 

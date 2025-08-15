@@ -354,6 +354,33 @@ def generate_full_sql_script():
         ('Bodyweight', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
         ('Bodyweight Only', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
         ('Chair', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        
+        -- Benches
+        ('Flat Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Box', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Decline Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Steps', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Stability Ball', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Back Extension Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        
+        -- Cable Attachments
+        ('Handles', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Handle', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Rope', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        
+        -- Machines
+        ('Seated Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leg Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leg Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Hack Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Sled', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Push Up Bar', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Squat Rack', (SELECT id FROM equipment_types WHERE name = 'Racks')),
+        ('Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        
+        -- Other
+        ('Sliders', (SELECT id FROM equipment_types WHERE name = 'Other')),
         ('Large Textbook', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
         ('Stick', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
         ('Towel', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
@@ -363,11 +390,9 @@ def generate_full_sql_script():
         ('EZ Bar', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
         ('Hammer Curl Bar', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
         ('Weight Plate', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
-        ('Back Extension Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Decline Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Decline Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Flat Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Flat Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Flat Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Incline (Adjustable) Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Incline Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
@@ -401,15 +426,12 @@ def generate_full_sql_script():
         ('Chest Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Fly Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Glute Kickback Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Hack Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('High Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Hip Abduction Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Hip Adduction Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Incline Chest Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Lat Pulldown Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Lateral Raise Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Lag Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Lag Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Lying Crunch Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Preacher Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
@@ -420,12 +442,9 @@ def generate_full_sql_script():
         ('Tricep Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Ab Wheel', (SELECT id FROM equipment_types WHERE name = 'Other')),
         ('Battle Ropes', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Box', (SELECT id FROM equipment_types WHERE name = 'Other')),
         ('Landmine Holder', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Sled', (SELECT id FROM equipment_types WHERE name = 'Other')),
         ('Slider', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Stability (swiss) Ball', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Steps', (SELECT id FROM equipment_types WHERE name = 'Other'));
+        ('Stability (swiss) Ball', (SELECT id FROM equipment_types WHERE name = 'Other'));
 
     -- Seeding Routines and their default day/focus area structures (Your existing code is fine)
     WITH routine AS (INSERT INTO routines (name) VALUES ('3 Day Classic') RETURNING id),
@@ -492,9 +511,16 @@ def generate_full_sql_script():
     with open(json_path, 'r', encoding='utf-8') as f:
         exercise_data = json.load(f)
 
+    processed_exercise_names = set()
+
     # --- THE ROBUST DATA LOADING LOGIC ---
     for ex in exercise_data:
         ex_name = sql_escape(ex['name'])
+        if ex_name in processed_exercise_names:
+            print(f"--- SKIPPING DUPLICATE EXERCISE: {ex['name']} ---")
+            continue
+        processed_exercise_names.add(ex_name)
+
         ex_desc = sql_escape(ex.get('description', ''))
         
         type_mapping = {"Strength Training": "strength", "Muscle Growth": "strength", "Calorie Burning": "cardio"}
@@ -507,6 +533,19 @@ def generate_full_sql_script():
         
         ex_impact = ex.get('is_high_impact', False)
         primary_focus_area_name = sql_escape(ex['focus_areas'][0]) if ex.get('focus_areas') else 'Full Body'
+
+        # New logic to handle combined equipment names
+        raw_equipment = ex.get('equipment', [])
+        processed_equipment = set()
+        for item in raw_equipment:
+            # Split by slashes and trim whitespace
+            parts = [p.strip() for p in item.split('/')]
+            for part in parts:
+                if part in valid_equipment_names:
+                    processed_equipment.add(part)
+                else:
+                    # This is where the warning is generated
+                    pass
 
         with_clauses = [f"new_exercise AS (INSERT INTO exercises (name, description, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"]
         
@@ -521,17 +560,12 @@ def generate_full_sql_script():
                 focus_area_selects.append(f"SELECT id, (SELECT id FROM focus_areas WHERE name = '{sql_escape(area)}'), {is_primary} FROM new_exercise")
             with_clauses.append(f"ins_focus_areas AS (INSERT INTO exercise_focus_areas (exercise_id, focus_area_id, is_primary) {' UNION ALL '.join(focus_area_selects)})")
 
-        if ex.get('equipment'):
-            valid_equipment_for_exercise = []
-            for equip in ex['equipment']:
-                if equip in valid_equipment_names:
-                    valid_equipment_for_exercise.append(equip)
-                else:
-                    # THIS IS THE CRITICAL DEBUGGING STEP
-                    print(f"!!! WARNING !!! Equipment '{equip}' for exercise '{ex['name']}' not found in the database. It will be ignored.")
-            
-            if valid_equipment_for_exercise:
-                equipment_selects = [f"SELECT id, (SELECT id FROM equipment WHERE name = '{sql_escape(equip)}') FROM new_exercise" for equip in valid_equipment_for_exercise]
+        if processed_equipment:
+            equipment_selects = []
+            for equip_name in processed_equipment:
+                # No need to escape again, it's already clean from the set
+                equipment_selects.append(f"SELECT (SELECT id FROM new_exercise), (SELECT id FROM equipment WHERE name = '{equip_name}')")
+            if equipment_selects:
                 with_clauses.append(f"ins_equipment AS (INSERT INTO exercise_equipment (exercise_id, equipment_id) {' UNION ALL '.join(equipment_selects)})")
 
         if ex.get('contraindications'):
