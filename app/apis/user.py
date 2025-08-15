@@ -566,6 +566,54 @@ async def get_all_equipment(
         )
 
 
+@router.get("/exercises", response_model=ExercisesListResponse)
+async def get_all_exercises(
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Fetches all exercises from the database.
+    Returns a list of all available exercises with their details.
+    """
+    try:
+        # Fetch all exercises from database
+        exercises_data = await db_queries.fetch_all_exercises(db)
+        
+        # Transform the data to match our response model
+        exercises = []
+        for record in exercises_data:
+            # Parse focus areas
+            focus_areas = []
+            if record['focus_areas']:
+                # Handle the case where focus_areas might be a JSON string
+                focus_areas_data = record['focus_areas']
+                if isinstance(focus_areas_data, str):
+                    import json
+                    focus_areas_data = json.loads(focus_areas_data)
+                
+                for focus_area in focus_areas_data:
+                    if focus_area and isinstance(focus_area, dict) and focus_area.get('id'):
+                        focus_areas.append(ExerciseFocusArea(
+                            id=focus_area['id'],
+                            name=focus_area['name']
+                        ))
+            
+            exercises.append(ExerciseItem(
+                id=record['id'],
+                name=record['name'],
+                description=record.get('description'),
+                video_url=record.get('video_url'),
+                focus_areas=focus_areas
+            ))
+        
+        return ExercisesListResponse(exercises=exercises)
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while fetching exercises: {str(e)}"
+        )
+
+
 @router.put("/user/me/active-routine", status_code=200)
 async def update_user_active_routine(
     routine_update: UserRoutineUpdate,

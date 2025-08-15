@@ -275,6 +275,28 @@ async def fetch_all_equipment_grouped_by_type(conn: asyncpg.Connection):
     """
     return await conn.fetch(query)
 
+async def fetch_all_exercises(conn: asyncpg.Connection):
+    """Fetches all exercises from the database with their focus areas."""
+    query = """
+    SELECT 
+        e.id,
+        e.name,
+        e.description,
+        e.video_url,
+        json_agg(
+            json_build_object(
+                'id', fa.id,
+                'name', fa.name
+            ) ORDER BY fa.id
+        ) FILTER (WHERE fa.id IS NOT NULL) as focus_areas
+    FROM exercises e
+    LEFT JOIN exercise_focus_areas efa ON e.id = efa.exercise_id
+    LEFT JOIN focus_areas fa ON efa.focus_area_id = fa.id
+    GROUP BY e.id, e.name, e.description, e.video_url
+    ORDER BY e.id;
+    """
+    return await conn.fetch(query)
+
 
 # Add these new functions to your existing db_queries.py
 async def get_user_profile_for_workout(conn: asyncpg.Connection, user_id: int):

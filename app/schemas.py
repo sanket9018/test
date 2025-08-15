@@ -386,3 +386,21 @@ class EquipmentTypeResponse(BaseModel):
 class EquipmentListResponse(BaseModel):
     """Response model for the equipment list endpoint."""
     equipment_types: List[EquipmentTypeResponse]
+
+# Exercise response models
+class ExerciseFocusArea(BaseModel):
+    """Represents a focus area for an exercise."""
+    id: int
+    name: str
+
+class ExerciseItem(BaseModel):
+    """Represents a single exercise item."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    focus_areas: List[ExerciseFocusArea] = []
+
+class ExercisesListResponse(BaseModel):
+    """Response model for the exercises list endpoint."""
+    exercises: List[ExerciseItem]
