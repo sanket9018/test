@@ -343,7 +343,7 @@ async def generate_workout_plan(
 
     user_id = token_entry['user_id']
 
-    # Step 2: Fetch all necessary profile data and today's focus areas in one go
+    # Step 2: Fetch user profile and current day's focus areas from active routine
     user_data = await db_queries.get_profile_for_workout_generation(db, user_id)
     print("user_data", user_data)
     if not user_data:
@@ -352,6 +352,7 @@ async def generate_workout_plan(
             detail="User profile not found. Cannot generate workout."
         )
 
+    # Get focus areas from the user's active routine for today
     focus_area_ids = user_data['focus_area_ids']
     if not focus_area_ids:
         raise HTTPException(
@@ -372,70 +373,121 @@ async def generate_workout_plan(
     p_equipment_ids = list(equipment_ids) or [0]
     p_health_issue_ids = user_data['health_issue_ids'] or [0]
     
-    TOTAL_EXERCISES_WANTED = 7
-    # Ensure there's at least 1 exercise per focus area
-    exercises_per_focus = max(1, TOTAL_EXERCISES_WANTED // len(p_focus_area_ids))
+    # Calculate TOTAL_EXERCISES_WANTED based on duration
+    duration = user_data.get('duration', 30)  # Default to 30 minutes
+    print(f"Duration: {duration}")
+    if duration <= 10:
+        TOTAL_EXERCISES_WANTED = 3
+    elif duration <= 20:
+        TOTAL_EXERCISES_WANTED = 4
+    elif duration <= 30:
+        TOTAL_EXERCISES_WANTED = 5
+    elif duration <= 40:
+        TOTAL_EXERCISES_WANTED = 6
+    elif duration <= 50:
+        TOTAL_EXERCISES_WANTED = 7
+    elif duration <= 60:
+        TOTAL_EXERCISES_WANTED = 8
+    else:
+        # For durations > 60, add 1 exercise per additional 10 minutes
+        TOTAL_EXERCISES_WANTED = 8 + ((duration - 60) // 10)
+    
+    # Ensure at least 1-2 exercises per focus area
+    min_exercises_per_focus = min(2, TOTAL_EXERCISES_WANTED // len(p_focus_area_ids))
+    exercises_per_focus = max(min_exercises_per_focus, 30 // len(p_focus_area_ids))  # Get more candidates
 
-    # Step 4: Get recommendations with the corrected and efficient query
-    recommended_exercises = await db_queries.get_recommended_exercises(
+    # Step 4: Get exercises ensuring coverage of all focus areas
+    all_suitable_exercises = await db_queries.get_recommended_exercises(
         conn=db,
         fitness_level=user_data['fitness_level'],
         focus_area_ids=p_focus_area_ids,
         equipment_ids=p_equipment_ids,
         health_issue_ids=p_health_issue_ids,
         exercises_per_focus=exercises_per_focus,
-        total_limit=TOTAL_EXERCISES_WANTED
+        total_limit=50  # Get more candidates for better randomness
     )
+    
+    # Sort all exercises by ID for consistent ordering
+    all_suitable_exercises = sorted(all_suitable_exercises, key=lambda r: r['id'])
 
-    if not recommended_exercises:
+    if not all_suitable_exercises:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment."
         )
 
-    # Step 5: Apply randomness matrix logic
-    # randomness: 0-100, first N*(100-randomness)% fixed, rest random
+    # Step 5: Apply randomness logic
+    # randomness: 0-100, determines what % of exercises are randomized
+    # Fixed exercises are high-impact/primary exercises, rest are random
     import math, random
     randomness = user_data.get('randomness', 50)
     try:
         randomness = int(randomness)
-        # Ensure randomness is within valid range (0-100)
         randomness = max(0, min(100, randomness))
     except Exception:
         randomness = 50
-    total_count = len(recommended_exercises)
-    if total_count == 0:
+    
+    total_available = len(all_suitable_exercises)
+    if total_available == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment."
+            detail="No suitable exercises found for today's workout."
         )
     
-    # Calculate fixed and random counts
-    # If randomness is 50%, then 50% should be random, 50% should be fixed
-    random_count = math.floor(total_count * randomness / 100)
-    fixed_count = total_count - random_count
+    # Calculate how many exercises to return
+    exercises_to_return = min(TOTAL_EXERCISES_WANTED, total_available)
     
-    # Handle edge cases: ensure we have at least 1 fixed exercise if possible
-    if fixed_count == 0 and total_count > 0:
-        fixed_count = 1
-        random_count = total_count - 1
+    # Ensure at least 1-2 exercises per focus area are included
+    focus_area_exercises = {}
+    for exercise in all_suitable_exercises:
+        # Group exercises by their primary focus area (assuming it's in the exercise data)
+        primary_focus = exercise.get('primary_focus_area', 'Unknown')
+        if primary_focus not in focus_area_exercises:
+            focus_area_exercises[primary_focus] = []
+        focus_area_exercises[primary_focus].append(exercise)
     
-    print(f"randomness: {randomness}%, total: {total_count}, fixed: {fixed_count}, random: {random_count}")
+    # Guarantee at least 1 exercise per focus area
+    guaranteed_exercises = []
+    for focus_area, exercises in focus_area_exercises.items():
+        if exercises:
+            # Take the first exercise (already sorted by ID) for consistency
+            guaranteed_exercises.append(exercises[0])
+            # Add a second one if we have enough total exercises wanted
+            if len(exercises) > 1 and len(guaranteed_exercises) < TOTAL_EXERCISES_WANTED:
+                guaranteed_exercises.append(exercises[1])
     
-    # Fixed: sort by id for determinism (same exercises every time)
-    fixed = sorted(recommended_exercises, key=lambda r: r['id'])[:fixed_count]
+    # Remove guaranteed exercises from the main pool
+    guaranteed_ids = {ex['id'] for ex in guaranteed_exercises}
+    remaining_pool = [ex for ex in all_suitable_exercises if ex['id'] not in guaranteed_ids]
     
-    # Random: shuffle the rest and take random_count
-    random_part = recommended_exercises.copy()
-    # Remove fixed from random_part by id
-    fixed_ids = set(r['id'] for r in fixed)
-    random_part = [r for r in random_part if r['id'] not in fixed_ids]
-    random.shuffle(random_part)
-    random_selected = random_part[:random_count]
+    # Calculate how many more exercises we need
+    remaining_needed = TOTAL_EXERCISES_WANTED - len(guaranteed_exercises)
     
-    # Combine fixed and random exercises
-    result = fixed + random_selected
-    return [dict(record) for record in result]
+    print(f"Duration: {duration}min, Exercises wanted: {TOTAL_EXERCISES_WANTED}, Randomness: {randomness}%, Available: {total_available}, Focus areas: {len(p_focus_area_ids)}")
+    print(f"Guaranteed per focus area: {len(guaranteed_exercises)}, Remaining needed: {remaining_needed}")
+    
+    if remaining_needed > 0 and remaining_pool:
+        # Apply randomness to the remaining pool
+        fixed_from_remaining = math.ceil(remaining_needed * (100 - randomness) / 100)
+        random_from_remaining = remaining_needed - fixed_from_remaining
+        
+        # Fixed exercises (deterministic, already sorted by ID)
+        fixed_exercises = remaining_pool[:fixed_from_remaining]
+        
+        # Random exercises from remaining pool
+        random_pool = remaining_pool[fixed_from_remaining:]
+        random.shuffle(random_pool)
+        random_exercises = random_pool[:random_from_remaining]
+        
+        # Combine all exercises
+        final_exercises = guaranteed_exercises + fixed_exercises + random_exercises
+    else:
+        final_exercises = guaranteed_exercises[:TOTAL_EXERCISES_WANTED]
+    
+    # Final shuffle for better UX while maintaining focus area coverage
+    random.shuffle(final_exercises)
+    
+    return [dict(record) for record in final_exercises]
 
 
 @router.get("/me/workout/status", response_model=WorkoutDayStatusResponse)

@@ -486,7 +486,8 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         ubp.equipment_ids,
         ubp.health_issue_ids,
         tfa.focus_area_ids,
-        u.randomness
+        u.randomness,
+        u.duration
     FROM UserBaseProfile ubp
     LEFT JOIN TodayFocusAreas tfa ON 1=1
     JOIN users u ON u.id = ubp.user_id
