@@ -369,3 +369,20 @@ class UserRoutineDayResponse(BaseModel):
     user_routine_id: int
     day_number: int
     focus_areas: List[FocusAreaInfo] # Re-using the schema from the previous step
+
+# Equipment response models
+class EquipmentItem(BaseModel):
+    """Represents a single equipment item."""
+    id: int
+    name: str
+    description: Optional[str] = None
+
+class EquipmentTypeResponse(BaseModel):
+    """Represents an equipment type with its associated equipment."""
+    equipment_type_id: int
+    equipment_type_name: str
+    equipment_list: List[EquipmentItem]
+
+class EquipmentListResponse(BaseModel):
+    """Response model for the equipment list endpoint."""
+    equipment_types: List[EquipmentTypeResponse]

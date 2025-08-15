@@ -255,6 +255,26 @@ async def fetch_all_health_issues(conn: asyncpg.Connection):
     """Fetches all health issues from the database."""
     return await conn.fetch("SELECT id, name FROM health_issues ORDER BY id")
 
+async def fetch_all_equipment_grouped_by_type(conn: asyncpg.Connection):
+    """Fetches all equipment grouped by equipment_type as nested structure."""
+    query = """
+    SELECT 
+        et.id as equipment_type_id,
+        et.name as equipment_type_name,
+        json_agg(
+            json_build_object(
+                'id', e.id,
+                'name', e.name,
+                'description', e.description
+            ) ORDER BY e.id
+        ) as equipment_list
+    FROM equipment_types et
+    LEFT JOIN equipment e ON et.id = e.equipment_type_id
+    GROUP BY et.id, et.name
+    ORDER BY et.id;
+    """
+    return await conn.fetch(query)
+
 
 # Add these new functions to your existing db_queries.py
 async def get_user_profile_for_workout(conn: asyncpg.Connection, user_id: int):

@@ -519,6 +519,53 @@ async def get_current_workout_day_status(
     return dict(status_record)
 
 
+@router.get("/equipment", response_model=EquipmentListResponse)
+async def get_all_equipment(
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Fetches all equipment grouped by equipment_type as nested structure.
+    Returns equipment types with their associated equipment items.
+    """
+    try:
+        # Fetch equipment grouped by type from database
+        equipment_data = await db_queries.fetch_all_equipment_grouped_by_type(db)
+        
+        # Transform the data to match our response model
+        equipment_types = []
+        for record in equipment_data:
+            # Parse the JSON equipment list
+            equipment_list = []
+            if record['equipment_list'] and record['equipment_list'] != [None]:
+                # Handle the case where equipment_list might be a JSON string
+                equipment_data_list = record['equipment_list']
+                if isinstance(equipment_data_list, str):
+                    import json
+                    equipment_data_list = json.loads(equipment_data_list)
+                
+                for equipment in equipment_data_list:
+                    if equipment and isinstance(equipment, dict) and equipment.get('id'):  # Skip null equipment
+                        equipment_list.append(EquipmentItem(
+                            id=equipment['id'],
+                            name=equipment['name'],
+                            description=equipment.get('description')
+                        ))
+            
+            equipment_types.append(EquipmentTypeResponse(
+                equipment_type_id=record['equipment_type_id'],
+                equipment_type_name=record['equipment_type_name'],
+                equipment_list=equipment_list
+            ))
+        
+        return EquipmentListResponse(equipment_types=equipment_types)
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while fetching equipment: {str(e)}"
+        )
+
+
 @router.put("/user/me/active-routine", status_code=200)
 async def update_user_active_routine(
     routine_update: UserRoutineUpdate,
