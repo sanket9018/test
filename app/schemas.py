@@ -327,24 +327,33 @@ class UserActiveDayUpdate(BaseModel):
     day_number: int
 
 
+class FocusAreaInfo(BaseModel):
+    id: int
+    name: str
+
+class DirectExerciseInfo(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    order_in_day: int
+
 # Define a Pydantic model for the response of our new status endpoint
 class WorkoutDayStatusResponse(BaseModel):
     routine_name: str
     today_day_number: int
     total_routine_days: int
-    focus_areas_for_today: List[str]
-
-
-
-class FocusAreaInfo(BaseModel):
-    id: int
-    name: str
+    exercise_mode: str = "focus_areas"
+    focus_areas_for_today: List[str] = []
+    direct_exercises_for_today: List[DirectExerciseInfo] = []
 
 # Define the structure for a single day in the active routine
 class RoutineDayDetail(BaseModel):
     day_number: int
     is_current_day: bool  # True if this is the currently calculated workout day
-    focus_areas: List[FocusAreaInfo]
+    exercise_mode: str = "focus_areas"  # "focus_areas" or "direct_exercises"
+    focus_areas: List[FocusAreaInfo] = []
+    direct_exercises: List[DirectExerciseInfo] = []
 
 # Define the final response model for the new endpoint
 class ActiveRoutineDaysResponse(BaseModel):

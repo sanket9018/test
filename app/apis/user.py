@@ -343,7 +343,7 @@ async def generate_workout_plan(
 
     user_id = token_entry['user_id']
 
-    # Step 2: Fetch user profile and current day's focus areas from active routine
+    # Step 2: Fetch user profile and current day's workout data from active routine
     user_data = await db_queries.get_profile_for_workout_generation(db, user_id)
     print("user_data", user_data)
     if not user_data:
@@ -352,7 +352,29 @@ async def generate_workout_plan(
             detail="User profile not found. Cannot generate workout."
         )
 
-    # Get focus areas from the user's active routine for today
+    exercise_mode = user_data.get('exercise_mode', 'focus_areas')
+    
+    # Handle direct exercises mode
+    if exercise_mode == 'direct_exercises':
+        direct_exercises_json = user_data.get('direct_exercises', '[]')
+        
+        # Parse JSON string to Python list
+        import json
+        try:
+            direct_exercises = json.loads(direct_exercises_json) if isinstance(direct_exercises_json, str) else direct_exercises_json
+        except json.JSONDecodeError:
+            direct_exercises = []
+        
+        if not direct_exercises:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No direct exercises found for today. Please add exercises to this day or switch to focus areas mode."
+            )
+        
+        # Return the direct exercises (now properly parsed)
+        return direct_exercises
+    
+    # Handle focus areas mode (existing logic)
     focus_area_ids = user_data['focus_area_ids']
     if not focus_area_ids:
         raise HTTPException(
@@ -515,8 +537,16 @@ async def get_current_workout_day_status(
             status_code=404,
             detail="Could not determine workout status. User may not have an active routine with workout days."
         )
+    
+    # Convert to dict and parse JSON fields
+    response_data = dict(status_record)
+    
+    # Parse direct_exercises_for_today JSON if it's a string
+    if isinstance(response_data.get('direct_exercises_for_today'), str):
+        import json
+        response_data['direct_exercises_for_today'] = json.loads(response_data['direct_exercises_for_today'])
         
-    return dict(status_record)
+    return response_data
 
 
 @router.get("/equipment", response_model=EquipmentListResponse)
@@ -771,6 +801,13 @@ async def get_active_routine_days_list(
     # Ensure the 'days' JSON from the DB is parsed into a Python list
     if isinstance(response_data.get('days'), str):
         response_data['days'] = json.loads(response_data['days'])
+    
+    # Parse nested JSON fields in each day
+    for day in response_data.get('days', []):
+        if isinstance(day.get('focus_areas'), str):
+            day['focus_areas'] = json.loads(day['focus_areas'])
+        if isinstance(day.get('direct_exercises'), str):
+            day['direct_exercises'] = json.loads(day['direct_exercises'])
 
     return response_data
 
@@ -896,4 +933,212 @@ async def remove_focus_area_from_routine_day(
         raise HTTPException(status_code=404, detail="Focus area assignment not found for the specified day and routine.")
 
     # A 204 response has no body
+    return None
+
+
+# --- PATCH API for Managing Routine Days (Focus Areas OR Direct Exercises) ---
+
+@router.patch("/user/me/routines/{user_routine_id}/days/{day_number}", status_code=200)
+async def update_routine_day(
+    user_routine_id: int,
+    day_number: int,
+    payload: Dict[str, Any],
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Updates a specific day in a user's routine. Supports switching between:
+    - focus_areas mode: User provides focus_area_ids to set focus areas
+    - direct_exercises mode: User provides exercises list with exercise details
+    
+    The endpoint automatically handles mode switching:
+    - If focus_area_ids provided: switches to focus_areas mode, clears exercises
+    - If exercises provided: switches to direct_exercises mode, clears focus areas
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    focus_area_ids = payload.get('focus_area_ids')
+    exercises = payload.get('exercises')
+    
+    # Validate that only one mode is provided
+    if focus_area_ids is not None and exercises is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot provide both focus_area_ids and exercises. Choose one mode."
+        )
+    
+    if focus_area_ids is None and exercises is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either focus_area_ids or exercises."
+        )
+
+    try:
+        async with conn.transaction():
+            # Handle focus areas mode
+            if focus_area_ids is not None:
+                success = await db_queries.switch_day_to_focus_areas(
+                    conn, user_id, user_routine_id, day_number, focus_area_ids
+                )
+                if not success:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Routine {user_routine_id} or Day {day_number} not found for this user."
+                    )
+                return success_response(
+                    data={"exercise_mode": "focus_areas", "focus_area_ids": focus_area_ids},
+                    message="Day updated to focus areas mode successfully."
+                )
+            
+            # Handle direct exercises mode
+            elif exercises is not None:
+                # First, get the user_routine_day_id and switch mode
+                day_query = """
+                SELECT urd.id
+                FROM user_routine_days urd
+                JOIN user_routines ur ON urd.user_routine_id = ur.id
+                WHERE ur.user_id = $1 AND ur.id = $2 AND urd.day_number = $3
+                """
+                day_result = await conn.fetchrow(day_query, user_id, user_routine_id, day_number)
+                
+                if not day_result:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Routine {user_routine_id} or Day {day_number} not found for this user."
+                    )
+                
+                user_routine_day_id = day_result['id']
+                
+                # Clear focus areas and switch mode
+                await conn.execute(
+                    "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = $1",
+                    user_routine_day_id
+                )
+                await conn.execute(
+                    "DELETE FROM user_routine_day_exercises WHERE user_routine_day_id = $1",
+                    user_routine_day_id
+                )
+                await conn.execute(
+                    "UPDATE user_routine_days SET exercise_mode = 'direct_exercises' WHERE id = $1",
+                    user_routine_day_id
+                )
+                
+                # Add exercises
+                exercise_records = []
+                for idx, exercise in enumerate(exercises):
+                    exercise_id = exercise.get('exercise_id')
+                    
+                    if not exercise_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Each exercise must have an exercise_id."
+                        )
+                    
+                    exercise_records.append((
+                        user_routine_day_id, exercise_id, idx + 1
+                    ))
+                
+                # Insert exercises
+                if exercise_records:
+                    await conn.copy_records_to_table(
+                        'user_routine_day_exercises',
+                        records=exercise_records,
+                        columns=('user_routine_day_id', 'exercise_id', 'order_in_day')
+                    )
+                
+                return success_response(
+                    data={"exercise_mode": "direct_exercises", "exercises_count": len(exercises)},
+                    message="Day updated to direct exercises mode successfully."
+                )
+                
+    except asyncpg.ForeignKeyViolationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid ID provided: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred: {str(e)}"
+        )
+
+
+@router.post("/user/me/routines/{user_routine_id}/days/{day_number}/exercises", status_code=201)
+async def add_exercise_to_routine_day(
+    user_routine_id: int,
+    day_number: int,
+    payload: Dict[str, Any],
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Adds a direct exercise to a specific day within a user routine.
+    Automatically switches the day to 'direct_exercises' mode if not already.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    exercise_id = payload.get('exercise_id')
+    
+    if not exercise_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="exercise_id is required."
+        )
+
+    try:
+        success = await db_queries.add_exercise_to_day(
+            conn, user_id, user_routine_id, day_number, exercise_id
+        )
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Routine {user_routine_id} or Day {day_number} not found for this user."
+            )
+    except asyncpg.ForeignKeyViolationError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Exercise with ID {exercise_id} does not exist."
+        )
+
+    return success_response(
+        data={"exercise_id": exercise_id},
+        message="Exercise added successfully."
+    )
+
+
+@router.delete("/user/me/routines/{user_routine_id}/days/{day_number}/exercises/{exercise_id}", status_code=204)
+async def remove_exercise_from_routine_day(
+    user_routine_id: int,
+    day_number: int,
+    exercise_id: int,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Removes a direct exercise from a specific day in a user's routine.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    success = await db_queries.delete_exercise_from_day(
+        conn, user_id, user_routine_id, day_number, exercise_id
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Exercise assignment not found for the specified day and routine."
+        )
+
     return None

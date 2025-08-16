@@ -265,6 +265,31 @@ def generate_full_sql_script():
         PRIMARY KEY (user_routine_day_id, focus_area_id)
     );
 
+    -- Add exercise_mode column to user_routine_days to support dual mode (focus areas OR direct exercises)
+    ALTER TABLE user_routine_days 
+    ADD COLUMN exercise_mode VARCHAR(20) DEFAULT 'focus_areas' 
+    CHECK (exercise_mode IN ('focus_areas', 'direct_exercises'));
+
+    -- Create table to store direct exercises for routine days
+    CREATE TABLE user_routine_day_exercises (
+        id SERIAL PRIMARY KEY,
+        user_routine_day_id INTEGER NOT NULL REFERENCES user_routine_days(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        order_in_day INTEGER DEFAULT 1,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_routine_day_id, exercise_id)
+    );
+
+    -- Create indexes for better performance
+    CREATE INDEX idx_user_routine_day_exercises_day_id ON user_routine_day_exercises(user_routine_day_id);
+    CREATE INDEX idx_user_routine_day_exercises_exercise_id ON user_routine_day_exercises(exercise_id);
+
+    -- Add trigger to update updated_at timestamp
+    CREATE TRIGGER trigger_user_routine_day_exercises_updated_at
+    BEFORE UPDATE ON user_routine_day_exercises
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
     -- ========= *** CORRECTED FUNCTION AND TRIGGER FOR AUTOMATIC ROUTINE ASSIGNMENT *** =========
     CREATE OR REPLACE FUNCTION assign_default_routines_to_user()
     RETURNS TRIGGER AS $$

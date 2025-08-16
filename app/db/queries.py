@@ -471,12 +471,12 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
     """
     Fetches all data needed for workout generation in a single, efficient query.
 
-    MODIFIED: This now prioritizes the user-selected 'current_day_number'
-    if it exists, falling back to the cyclical calculation otherwise.
+    UPDATED: Now supports both focus_areas and direct_exercises modes.
+    Returns focus_area_ids for focus_areas mode or direct_exercises for direct_exercises mode.
     """
     query = """
     WITH UserBaseProfile AS (
-        -- Step 1: Get the user's static profile information. (No change here)
+        -- Step 1: Get the user's static profile information.
         SELECT
             u.id AS user_id,
             u.fitness_level,
@@ -490,10 +490,10 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         GROUP BY u.id
     ),
     ActiveRoutineInfo AS (
-        -- Step 2: Find the active routine, its day count, AND the manually set day. (MODIFIED)
+        -- Step 2: Find the active routine, its day count, AND the manually set day.
         SELECT
             ur.id as user_routine_id,
-            ur.current_day_number, -- <<< GET THE MANUALLY SET DAY
+            ur.current_day_number,
             COUNT(urd.id) AS total_routine_days
         FROM user_routines ur
         JOIN user_routine_days urd ON ur.id = urd.user_routine_id
@@ -502,36 +502,63 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         HAVING COUNT(urd.id) > 0
     ),
     CurrentWorkoutDay AS (
-        -- Step 3: Calculate which day of the routine cycle it is today. (MODIFIED)
+        -- Step 3: Calculate which day of the routine cycle it is today.
         SELECT
             ari.user_routine_id,
-            -- Use the stored day if not NULL, otherwise calculate it.
             COALESCE(
                 ari.current_day_number,
                 (EXTRACT(DAY FROM (NOW() - ubp.created_at))::int % ari.total_routine_days) + 1
             ) AS today_day_number
         FROM UserBaseProfile ubp, ActiveRoutineInfo ari
     ),
-    TodayFocusAreas AS (
-        -- Step 4: Get the focus areas for today's workout day. (No change here)
+    TodayWorkoutData AS (
+        -- Step 4: Get the workout data for today (focus areas OR direct exercises).
         SELECT
             cwd.user_routine_id,
-            ARRAY_AGG(urdfa.focus_area_id) as focus_area_ids
+            urd.exercise_mode,
+            -- Focus areas (only if in focus_areas mode)
+            CASE 
+                WHEN urd.exercise_mode = 'focus_areas' THEN
+                    COALESCE(ARRAY_AGG(DISTINCT urdfa.focus_area_id) FILTER (WHERE urdfa.focus_area_id IS NOT NULL), '{}'::int[])
+                ELSE '{}'::int[]
+            END as focus_area_ids,
+            -- Direct exercises (only if in direct_exercises mode)
+            CASE 
+                WHEN urd.exercise_mode = 'direct_exercises' THEN
+                    COALESCE(
+                        json_agg(
+                            json_build_object(
+                                'id', e.id,
+                                'name', e.name,
+                                'description', e.description,
+                                'video_url', e.video_url,
+                                'primary_focus_area', COALESCE(fa.name, 'General')
+                            ) ORDER BY urde.order_in_day
+                        ) FILTER (WHERE e.id IS NOT NULL),
+                        '[]'::json
+                    )
+                ELSE '[]'::json
+            END as direct_exercises
         FROM CurrentWorkoutDay cwd
         JOIN user_routine_days urd ON cwd.user_routine_id = urd.user_routine_id AND cwd.today_day_number = urd.day_number
-        JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
-        GROUP BY cwd.user_routine_id
+        LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
+        LEFT JOIN user_routine_day_exercises urde ON urd.id = urde.user_routine_day_id
+        LEFT JOIN exercises e ON urde.exercise_id = e.id
+        LEFT JOIN focus_areas fa ON e.primary_focus_area_id = fa.id
+        GROUP BY cwd.user_routine_id, urd.exercise_mode
     )
-    -- Final Step: Combine the profile with the focus areas for today. (No change here)
+    -- Final Step: Combine the profile with the workout data for today.
     SELECT
         ubp.fitness_level,
         ubp.equipment_ids,
         ubp.health_issue_ids,
-        tfa.focus_area_ids,
+        twd.exercise_mode,
+        twd.focus_area_ids,
+        twd.direct_exercises,
         u.randomness,
         u.duration
     FROM UserBaseProfile ubp
-    LEFT JOIN TodayFocusAreas tfa ON 1=1
+    LEFT JOIN TodayWorkoutData twd ON 1=1
     JOIN users u ON u.id = ubp.user_id
     WHERE ubp.user_id = $1;
     """
@@ -540,16 +567,16 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
 
 async def get_workout_day_status(conn: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
     """
-    MODIFIED: Fetches status, prioritizing the user-set 'current_day_number'.
+    UPDATED: Fetches status with both focus areas and direct exercises support.
     """
     query = """
     WITH ActiveRoutineInfo AS (
-        -- Find the active routine and get the manually set day. (MODIFIED)
+        -- Find the active routine and get the manually set day.
         SELECT
             ur.id as user_routine_id,
             r.name as routine_name,
             u.created_at,
-            ur.current_day_number, -- <<< GET THE MANUALLY SET DAY
+            ur.current_day_number,
             COUNT(urd.id) AS total_routine_days
         FROM users u
         JOIN user_routines ur ON u.id = ur.user_id
@@ -560,29 +587,53 @@ async def get_workout_day_status(conn: asyncpg.Connection, user_id: int) -> Opti
         HAVING COUNT(urd.id) > 0
     ),
     CurrentWorkoutDay AS (
-        -- Calculate the active day. (MODIFIED)
+        -- Calculate the active day.
         SELECT
             ari.user_routine_id,
             ari.routine_name,
             ari.total_routine_days,
-            -- Use the stored day if not NULL, otherwise calculate it.
             COALESCE(
                 ari.current_day_number,
                 (EXTRACT(DAY FROM (NOW() - ari.created_at))::int % ari.total_routine_days) + 1
             ) AS today_day_number
         FROM ActiveRoutineInfo ari
     )
-    -- Get focus areas for the determined day. (No change here)
+    -- Get both focus areas and direct exercises for today's workout day.
     SELECT
         cwd.routine_name,
         cwd.today_day_number,
         cwd.total_routine_days,
-        ARRAY_AGG(fa.name) as focus_areas_for_today
+        urd.exercise_mode,
+        -- Focus areas (only if in focus_areas mode)
+        CASE 
+            WHEN urd.exercise_mode = 'focus_areas' THEN
+                COALESCE(ARRAY_AGG(DISTINCT fa.name) FILTER (WHERE fa.name IS NOT NULL), '{}')
+            ELSE '{}'::text[]
+        END as focus_areas_for_today,
+        -- Direct exercises (only if in direct_exercises mode)
+        CASE 
+            WHEN urd.exercise_mode = 'direct_exercises' THEN
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'id', e.id,
+                            'name', e.name,
+                            'description', e.description,
+                            'video_url', e.video_url,
+                            'order_in_day', urde.order_in_day
+                        ) ORDER BY urde.order_in_day
+                    ) FILTER (WHERE e.id IS NOT NULL),
+                    '[]'::json
+                )
+            ELSE '[]'::json
+        END as direct_exercises_for_today
     FROM CurrentWorkoutDay cwd
     JOIN user_routine_days urd ON cwd.user_routine_id = urd.user_routine_id AND cwd.today_day_number = urd.day_number
-    JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
-    JOIN focus_areas fa ON urdfa.focus_area_id = fa.id
-    GROUP BY cwd.routine_name, cwd.today_day_number, cwd.total_routine_days;
+    LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
+    LEFT JOIN focus_areas fa ON urdfa.focus_area_id = fa.id
+    LEFT JOIN user_routine_day_exercises urde ON urd.id = urde.user_routine_day_id
+    LEFT JOIN exercises e ON urde.exercise_id = e.id
+    GROUP BY cwd.routine_name, cwd.today_day_number, cwd.total_routine_days, urd.exercise_mode;
     """
     return await conn.fetchrow(query, user_id)
 
@@ -685,14 +736,13 @@ async def set_active_day_for_user(conn: asyncpg.Connection, user_id: int, day_nu
 async def get_active_routine_days(conn: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
     """
     Fetches the details for the user's currently active routine, including a list
-    of ALL its days, their focus areas, and which day is currently active.
+    of ALL its days, their focus areas/exercises, and which day is currently active.
 
-    CORRECTED: This version uses LEFT JOINs to ensure that all days of a routine
-    are returned, even if they have not yet been assigned any focus areas.
+    UPDATED: Now supports both focus_areas and direct_exercises modes.
     """
     query = """
     WITH ActiveRoutine AS (
-        -- Step 1: Find the active routine and calculate the current day. This part is correct.
+        -- Step 1: Find the active routine and calculate the current day.
         SELECT
             ur.id as user_routine_id,
             ur.routine_id,
@@ -710,40 +760,62 @@ async def get_active_routine_days(conn: asyncpg.Connection, user_id: int) -> Opt
         HAVING COUNT(urd.id) > 0
     ),
     DayFocusAreas AS (
-        -- Step 2: Pre-aggregate focus areas for each day. THIS PART IS CORRECTED.
+        -- Step 2: Pre-aggregate focus areas for each day.
         SELECT
             urd.user_routine_id,
             urd.day_number,
-            -- Use COALESCE to turn a NULL result (no focus areas) into an empty JSON array '[]'.
+            urd.exercise_mode,
             COALESCE(
                 json_agg(
                     json_build_object('id', fa.id, 'name', fa.name) ORDER BY fa.name
-                -- The FILTER clause is essential to prevent aggregating a [null] object.
                 ) FILTER (WHERE fa.id IS NOT NULL),
                 '[]'::json
             ) AS focus_areas
         FROM user_routine_days urd
-        -- Use LEFT JOIN to include days even if they have no matching focus areas.
         LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
         LEFT JOIN focus_areas fa ON urdfa.focus_area_id = fa.id
         WHERE urd.user_routine_id IN (SELECT user_routine_id FROM ActiveRoutine)
+        GROUP BY urd.user_routine_id, urd.day_number, urd.exercise_mode
+    ),
+    DayDirectExercises AS (
+        -- Step 3: Pre-aggregate direct exercises for each day.
+        SELECT
+            urd.user_routine_id,
+            urd.day_number,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'id', e.id,
+                        'name', e.name,
+                        'description', e.description,
+                        'video_url', e.video_url,
+                        'order_in_day', urde.order_in_day
+                    ) ORDER BY urde.order_in_day, e.name
+                ) FILTER (WHERE e.id IS NOT NULL),
+                '[]'::json
+            ) AS direct_exercises
+        FROM user_routine_days urd
+        LEFT JOIN user_routine_day_exercises urde ON urd.id = urde.user_routine_day_id
+        LEFT JOIN exercises e ON urde.exercise_id = e.id
+        WHERE urd.user_routine_id IN (SELECT user_routine_id FROM ActiveRoutine)
         GROUP BY urd.user_routine_id, urd.day_number
     )
-    -- Final Step: Combine the data. This part is also made more robust.
+    -- Final Step: Combine all the data.
     SELECT
         ar.routine_id,
         ar.routine_name,
-        -- Final COALESCE to handle the edge case where a routine might have no days.
         COALESCE(json_agg(
             json_build_object(
                 'day_number', dfa.day_number,
                 'is_current_day', (dfa.day_number = ar.current_day_number),
-                'focus_areas', dfa.focus_areas
+                'exercise_mode', dfa.exercise_mode,
+                'focus_areas', dfa.focus_areas,
+                'direct_exercises', dde.direct_exercises
             ) ORDER BY dfa.day_number
         ), '[]'::json) AS days
     FROM ActiveRoutine ar
-    -- Use LEFT JOIN here as a final safeguard.
     LEFT JOIN DayFocusAreas dfa ON ar.user_routine_id = dfa.user_routine_id
+    LEFT JOIN DayDirectExercises dde ON ar.user_routine_id = dde.user_routine_id AND dfa.day_number = dde.day_number
     GROUP BY ar.routine_id, ar.routine_name;
     """
     return await conn.fetchrow(query, user_id)
@@ -876,3 +948,128 @@ async def delete_focus_area_from_day(conn: asyncpg.Connection, user_id: int, use
     """
     deleted_id = await conn.fetchval(query, user_id, user_routine_id, day_number, focus_area_id)
     return deleted_id is not None
+
+
+# --- Direct Exercise Management for Routine Days ---
+
+async def add_exercise_to_day(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int, exercise_id: int) -> bool:
+    """
+    Adds a direct exercise to a specific day within a user routine.
+    Automatically switches the day to 'direct_exercises' mode and clears focus areas.
+    
+    Returns:
+        True on successful insertion, False otherwise.
+    """
+    async with conn.transaction():
+        # First, get the user_routine_day_id and verify ownership
+        day_query = """
+        SELECT urd.id, urd.exercise_mode
+        FROM user_routine_days urd
+        JOIN user_routines ur ON urd.user_routine_id = ur.id
+        WHERE ur.user_id = $1 AND ur.id = $2 AND urd.day_number = $3
+        """
+        day_result = await conn.fetchrow(day_query, user_id, user_routine_id, day_number)
+        
+        if not day_result:
+            return False
+        
+        user_routine_day_id = day_result['id']
+        current_mode = day_result['exercise_mode']
+        
+        # If switching from focus_areas to direct_exercises, clear focus areas
+        if current_mode == 'focus_areas':
+            await conn.execute(
+                "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = $1",
+                user_routine_day_id
+            )
+            # Update mode to direct_exercises
+            await conn.execute(
+                "UPDATE user_routine_days SET exercise_mode = 'direct_exercises' WHERE id = $1",
+                user_routine_day_id
+            )
+        
+        # Add the exercise
+        insert_query = """
+        INSERT INTO user_routine_day_exercises (user_routine_day_id, exercise_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_routine_day_id, exercise_id) DO NOTHING
+        RETURNING id
+        """
+        result = await conn.fetchval(insert_query, user_routine_day_id, exercise_id)
+        return result is not None
+
+
+async def delete_exercise_from_day(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int, exercise_id: int) -> bool:
+    """
+    Deletes a direct exercise from a specific day within a user routine.
+    Verifies ownership before deleting.
+    
+    Returns:
+        True if an exercise was deleted, False otherwise.
+    """
+    query = """
+    DELETE FROM user_routine_day_exercises urde
+    WHERE urde.user_routine_day_id = (
+        SELECT urd.id
+        FROM user_routine_days urd
+        JOIN user_routines ur ON urd.user_routine_id = ur.id
+        WHERE ur.user_id = $1 AND ur.id = $2 AND urd.day_number = $3
+    )
+    AND urde.exercise_id = $4
+    RETURNING urde.id
+    """
+    deleted_id = await conn.fetchval(query, user_id, user_routine_id, day_number, exercise_id)
+    return deleted_id is not None
+
+
+async def switch_day_to_focus_areas(conn: asyncpg.Connection, user_id: int, user_routine_id: int, day_number: int, focus_area_ids: List[int]) -> bool:
+    """
+    Switches a day from direct_exercises mode to focus_areas mode.
+    Clears all direct exercises and adds the specified focus areas.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    async with conn.transaction():
+        # Get the user_routine_day_id and verify ownership
+        day_query = """
+        SELECT urd.id
+        FROM user_routine_days urd
+        JOIN user_routines ur ON urd.user_routine_id = ur.id
+        WHERE ur.user_id = $1 AND ur.id = $2 AND urd.day_number = $3
+        """
+        day_result = await conn.fetchrow(day_query, user_id, user_routine_id, day_number)
+        
+        if not day_result:
+            return False
+        
+        user_routine_day_id = day_result['id']
+        
+        # Clear direct exercises
+        await conn.execute(
+            "DELETE FROM user_routine_day_exercises WHERE user_routine_day_id = $1",
+            user_routine_day_id
+        )
+        
+        # Clear existing focus areas
+        await conn.execute(
+            "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = $1",
+            user_routine_day_id
+        )
+        
+        # Update mode to focus_areas
+        await conn.execute(
+            "UPDATE user_routine_days SET exercise_mode = 'focus_areas' WHERE id = $1",
+            user_routine_day_id
+        )
+        
+        # Add new focus areas
+        if focus_area_ids:
+            focus_area_records = [(user_routine_day_id, fa_id) for fa_id in focus_area_ids]
+            await conn.copy_records_to_table(
+                'user_routine_day_focus_areas',
+                records=focus_area_records,
+                columns=('user_routine_day_id', 'focus_area_id')
+            )
+        
+        return True
