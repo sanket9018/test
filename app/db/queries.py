@@ -1,5 +1,5 @@
 import asyncpg
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import json
 
 async def execute_query(conn: asyncpg.Connection, query: str, params: dict):
@@ -126,7 +126,7 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
     """
     query = """
     WITH user_routine_details AS (
-        -- This CTE for routines is perfect, no changes needed.
+        -- Updated CTE to include both focus areas and direct exercises
         WITH day_focus_areas AS (
             SELECT
                 urda.user_routine_day_id,
@@ -135,6 +135,22 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
             JOIN focus_areas fa ON urda.focus_area_id = fa.id
             GROUP BY urda.user_routine_day_id
         ),
+        day_direct_exercises AS (
+            SELECT
+                urde.user_routine_day_id,
+                json_agg(
+                    json_build_object(
+                        'id', e.id,
+                        'name', e.name,
+                        'description', e.description,
+                        'video_url', e.video_url,
+                        'order_in_day', urde.order_in_day
+                    ) ORDER BY urde.order_in_day
+                ) AS direct_exercises
+            FROM user_routine_day_exercises urde
+            JOIN exercises e ON urde.exercise_id = e.id
+            GROUP BY urde.user_routine_day_id
+        ),
         routine_days_agg AS (
             SELECT
                 urd.user_routine_id,
@@ -142,11 +158,14 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
                     json_build_object(
                         'id', urd.id,
                         'day_number', urd.day_number,
-                        'focus_areas', COALESCE(dfa.focus_areas, '[]'::json)
+                        'exercise_mode', urd.exercise_mode,
+                        'focus_areas', COALESCE(dfa.focus_areas, '[]'::json),
+                        'direct_exercises', COALESCE(dde.direct_exercises, '[]'::json)
                     ) ORDER BY urd.day_number
                 ) AS days
             FROM user_routine_days urd
             LEFT JOIN day_focus_areas dfa ON urd.id = dfa.user_routine_day_id
+            LEFT JOIN day_direct_exercises dde ON urd.id = dde.user_routine_day_id
             GROUP BY urd.user_routine_id
         )
         SELECT
@@ -828,6 +847,148 @@ async def get_all_focus_areas(conn: asyncpg.Connection) -> List[asyncpg.Record]:
     """
     query = "SELECT id, name FROM focus_areas ORDER BY id;"
     return await conn.fetch(query)
+
+
+async def swap_routine_days_content(conn: asyncpg.Connection, user_id: int, from_day: int, to_day: int) -> Dict[str, Any]:
+    """
+    Swaps the content (focus areas and/or direct exercises) between two routine days
+    for the user's active routine. Handles all combinations:
+    - Focus areas to focus areas
+    - Direct exercises to direct exercises  
+    - Focus areas to direct exercises
+    - Direct exercises to focus areas
+    
+    Returns information about what was swapped.
+    """
+    async with conn.transaction():
+        # Step 1: Get the user's active routine and validate the days exist
+        active_routine_query = """
+        SELECT ur.id as user_routine_id
+        FROM user_routines ur
+        WHERE ur.user_id = $1 AND ur.is_active = TRUE
+        """
+        active_routine = await conn.fetchrow(active_routine_query, user_id)
+        
+        if not active_routine:
+            raise ValueError("No active routine found for user")
+        
+        user_routine_id = active_routine['user_routine_id']
+        
+        # Step 2: Get both days' data
+        days_query = """
+        SELECT 
+            urd.id,
+            urd.day_number,
+            urd.exercise_mode,
+            -- Focus areas
+            COALESCE(
+                array_agg(DISTINCT urdfa.focus_area_id) FILTER (WHERE urdfa.focus_area_id IS NOT NULL), 
+                '{}'::int[]
+            ) as focus_area_ids,
+            -- Direct exercises
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'exercise_id', urde.exercise_id,
+                        'order_in_day', urde.order_in_day
+                    ) ORDER BY urde.order_in_day
+                ) FILTER (WHERE urde.exercise_id IS NOT NULL),
+                '[]'::json
+            ) as direct_exercises
+        FROM user_routine_days urd
+        LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
+        LEFT JOIN user_routine_day_exercises urde ON urd.id = urde.user_routine_day_id
+        WHERE urd.user_routine_id = $1 AND urd.day_number = ANY($2::int[])
+        GROUP BY urd.id, urd.day_number, urd.exercise_mode
+        ORDER BY urd.day_number
+        """
+        
+        days_data = await conn.fetch(days_query, user_routine_id, [from_day, to_day])
+        
+        if len(days_data) != 2:
+            raise ValueError(f"Could not find both days {from_day} and {to_day} in active routine")
+        
+        # Organize data by day number
+        day_data = {row['day_number']: row for row in days_data}
+        from_day_data = day_data[from_day]
+        to_day_data = day_data[to_day]
+        
+        # Step 3: Clear existing data for both days
+        await conn.execute(
+            "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = ANY($1::int[])",
+            [from_day_data['id'], to_day_data['id']]
+        )
+        await conn.execute(
+            "DELETE FROM user_routine_day_exercises WHERE user_routine_day_id = ANY($1::int[])",
+            [from_day_data['id'], to_day_data['id']]
+        )
+        
+        # Step 4: Update exercise modes
+        await conn.execute(
+            "UPDATE user_routine_days SET exercise_mode = $1 WHERE id = $2",
+            to_day_data['exercise_mode'], from_day_data['id']
+        )
+        await conn.execute(
+            "UPDATE user_routine_days SET exercise_mode = $1 WHERE id = $2", 
+            from_day_data['exercise_mode'], to_day_data['id']
+        )
+        
+        # Step 5: Swap focus areas
+        if from_day_data['focus_area_ids']:
+            focus_area_records = [(to_day_data['id'], fa_id) for fa_id in from_day_data['focus_area_ids']]
+            await conn.copy_records_to_table(
+                'user_routine_day_focus_areas',
+                records=focus_area_records,
+                columns=('user_routine_day_id', 'focus_area_id')
+            )
+        
+        if to_day_data['focus_area_ids']:
+            focus_area_records = [(from_day_data['id'], fa_id) for fa_id in to_day_data['focus_area_ids']]
+            await conn.copy_records_to_table(
+                'user_routine_day_focus_areas', 
+                records=focus_area_records,
+                columns=('user_routine_day_id', 'focus_area_id')
+            )
+        
+        # Step 6: Swap direct exercises
+        from_exercises = json.loads(from_day_data['direct_exercises']) if isinstance(from_day_data['direct_exercises'], str) else from_day_data['direct_exercises']
+        to_exercises = json.loads(to_day_data['direct_exercises']) if isinstance(to_day_data['direct_exercises'], str) else to_day_data['direct_exercises']
+        
+        if from_exercises:
+            exercise_records = [(to_day_data['id'], ex['exercise_id'], ex['order_in_day']) for ex in from_exercises]
+            await conn.copy_records_to_table(
+                'user_routine_day_exercises',
+                records=exercise_records,
+                columns=('user_routine_day_id', 'exercise_id', 'order_in_day')
+            )
+        
+        if to_exercises:
+            exercise_records = [(from_day_data['id'], ex['exercise_id'], ex['order_in_day']) for ex in to_exercises]
+            await conn.copy_records_to_table(
+                'user_routine_day_exercises',
+                records=exercise_records, 
+                columns=('user_routine_day_id', 'exercise_id', 'order_in_day')
+            )
+        
+        # Step 7: Determine what was swapped
+        from_has_focus = bool(from_day_data['focus_area_ids'])
+        from_has_exercises = bool(from_exercises)
+        to_has_focus = bool(to_day_data['focus_area_ids'])
+        to_has_exercises = bool(to_exercises)
+        
+        if (from_has_focus and to_has_focus) and not (from_has_exercises or to_has_exercises):
+            swapped_type = "focus_areas"
+        elif (from_has_exercises and to_has_exercises) and not (from_has_focus or to_has_focus):
+            swapped_type = "direct_exercises"
+        else:
+            swapped_type = "mixed"
+        
+        return {
+            "success": True,
+            "swapped_content_type": swapped_type,
+            "from_day_number": from_day,
+            "to_day_number": to_day
+        }
 
 
 async def add_day_to_user_routine(conn: asyncpg.Connection, user_id: int, user_routine_id: int) -> Optional[asyncpg.Record]:

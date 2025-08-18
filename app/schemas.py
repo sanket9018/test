@@ -108,11 +108,21 @@ class FocusAreaResponse(BaseModel):
     id: int
     name: str
 
+class DirectExerciseInfo(BaseModel):
+    """Represents a direct exercise with details."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    order_in_day: int
+
 class UserRoutineDayResponse(BaseModel):
     """Represents a single, customizable day within a user's routine."""
     id: int
     day_number: int
+    exercise_mode: str = "focus_areas"  # "focus_areas" or "direct_exercises"
     focus_areas: List[FocusAreaResponse] = []
+    direct_exercises: List[DirectExerciseInfo] = []
 
 class UserRoutineResponse(BaseModel):
     """Represents a user's personal, customizable copy of a routine."""
@@ -331,12 +341,6 @@ class FocusAreaInfo(BaseModel):
     id: int
     name: str
 
-class DirectExerciseInfo(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    video_url: Optional[str] = None
-    order_in_day: int
 
 # Define a Pydantic model for the response of our new status endpoint
 class WorkoutDayStatusResponse(BaseModel):
@@ -413,3 +417,15 @@ class ExerciseItem(BaseModel):
 class ExercisesListResponse(BaseModel):
     """Response model for the exercises list endpoint."""
     exercises: List[ExerciseItem]
+
+class RoutineDaySwapRequest(BaseModel):
+    """Schema for swapping content between two routine days."""
+    from_day_number: int = Field(..., ge=1, le=7, description="Source day number to swap from")
+    to_day_number: int = Field(..., ge=1, le=7, description="Target day number to swap to")
+
+class RoutineDaySwapResponse(BaseModel):
+    """Response model for successful day swap operation."""
+    message: str
+    from_day_number: int
+    to_day_number: int
+    swapped_content_type: str  # "focus_areas", "direct_exercises", or "mixed"

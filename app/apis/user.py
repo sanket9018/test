@@ -763,6 +763,73 @@ async def update_user_active_day(
     return success_response({}, message=f"Successfully set active workout to Day {day_update.day_number}", status_code=201)
 
 
+@router.patch("/user/me/routine/swap-days", response_model=RoutineDaySwapResponse)
+async def swap_routine_days(
+    swap_request: RoutineDaySwapRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Swaps the content between two routine days for the authenticated user's active routine.
+    
+    This endpoint allows users to exchange workout content between any two days in their routine.
+    It handles all combinations:
+    - Focus areas to focus areas
+    - Direct exercises to direct exercises  
+    - Focus areas to direct exercises
+    - Direct exercises to focus areas
+    
+    The swap operation is atomic - either both days are updated successfully or no changes are made.
+    """
+    # 1. Authenticate the user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # 2. Validate that the days are different
+    if swap_request.from_day_number == swap_request.to_day_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot swap a day with itself. Please provide different day numbers."
+        )
+
+    # 3. Perform the swap operation
+    try:
+        swap_result = await db_queries.swap_routine_days_content(
+            conn, user_id, swap_request.from_day_number, swap_request.to_day_number
+        )
+        
+        if not swap_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to swap routine days due to an unexpected error."
+            )
+
+        # 4. Return success response
+        return RoutineDaySwapResponse(
+            message=f"Successfully swapped content between Day {swap_request.from_day_number} and Day {swap_request.to_day_number}",
+            from_day_number=swap_request.from_day_number,
+            to_day_number=swap_request.to_day_number,
+            swapped_content_type=swap_result["swapped_content_type"]
+        )
+
+    except ValueError as ve:
+        # Handle specific validation errors from the database function
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        # Handle any other unexpected errors
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while swapping routine days: {str(e)}"
+        )
+
+
 
 @router.get("/user/me/active-routine/days", response_model=ActiveRoutineDaysResponse)
 async def get_active_routine_days_list(
