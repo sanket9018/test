@@ -429,3 +429,39 @@ class RoutineDaySwapResponse(BaseModel):
     from_day_number: int
     to_day_number: int
     swapped_content_type: str  # "focus_areas", "direct_exercises", or "mixed"
+
+class UserGeneratedExerciseResponse(BaseModel):
+    """Response model for user's generated exercises with calculated values."""
+    id: int
+    exercise_id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    primary_focus_area: Optional[str] = None
+    weight_kg: float
+    reps: int
+    sets: int
+    one_rm_calculated: float
+    generated_at: datetime
+    updated_at: datetime
+
+class UserGeneratedExercisesListResponse(BaseModel):
+    """Response model for the list of user's generated exercises."""
+    exercises: List[UserGeneratedExerciseResponse]
+
+class UpdateUserGeneratedExerciseRequest(BaseModel):
+    """Request model for updating user generated exercise values."""
+    weight_kg: Optional[float] = Field(None, ge=0, le=1000, description="Weight in kg")
+    reps: Optional[int] = Field(None, ge=1, le=100, description="Number of repetitions")
+    sets: Optional[int] = Field(None, ge=1, le=20, description="Number of sets")
+
+class UpdateUserGeneratedExerciseResponse(BaseModel):
+    """Response model for updated user generated exercise."""
+    id: int
+    exercise_id: int
+    name: str
+    weight_kg: float
+    reps: int
+    sets: int
+    updated_at: datetime
+    message: str

@@ -575,7 +575,10 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         twd.focus_area_ids,
         twd.direct_exercises,
         u.randomness,
-        u.duration
+        u.duration,
+        u.current_weight_kg,
+        u.height_cm,
+        u.age
     FROM UserBaseProfile ubp
     LEFT JOIN TodayWorkoutData twd ON 1=1
     JOIN users u ON u.id = ubp.user_id
@@ -720,6 +723,165 @@ async def get_user_routines_list(conn: asyncpg.Connection, user_id: int) -> List
     """
     return await conn.fetch(query, user_id)
 
+
+def calculate_one_rm(body_weight_kg: float, height_cm: float, age: int) -> float:
+    """
+    Calculate 1RM using the formula: 0.6*BodyWeight + 0.08*Height - 0.3*Age + 10
+    Then divide by 2 to get the working weight as specified by user requirements.
+    """
+    one_rm = (0.6 * body_weight_kg) + (0.08 * height_cm) - (0.3 * age) + 10
+    working_weight = one_rm / 2
+    return round(working_weight, 2)
+
+def get_default_reps_sets_by_fitness_level(fitness_level: str) -> tuple:
+    """
+    Returns default reps and sets based on fitness level.
+    Returns (reps, sets)
+    """
+    fitness_defaults = {
+        'beginner': (15, 3),
+        'intermediate': (12, 3), 
+        'advanced': (10, 3)
+    }
+    return fitness_defaults.get(fitness_level.lower(), (12, 3))
+
+async def store_user_generated_exercises(
+    conn: asyncpg.Connection, 
+    user_id: int, 
+    exercise_ids: List[int],
+    user_data: dict
+) -> bool:
+    """
+    Stores generated exercises for a user with calculated KG, REPS, and SETS.
+    First deletes existing generated exercises, then inserts new ones.
+    """
+    try:
+        # Step 1: Delete existing generated exercises for this user
+        await conn.execute(
+            "DELETE FROM user_generated_exercises WHERE user_id = $1",
+            user_id
+        )
+        
+        # Step 2: Calculate 1RM and get default reps/sets
+        body_weight = user_data.get('current_weight_kg', 70.0)
+        height = user_data.get('height_cm', 170)
+        age = user_data.get('age', 25)
+        fitness_level = user_data.get('fitness_level', 'intermediate')
+        
+        calculated_weight = calculate_one_rm(body_weight, height, age)
+        default_reps, default_sets = get_default_reps_sets_by_fitness_level(fitness_level)
+        
+        # Step 3: Insert new generated exercises
+        if exercise_ids:
+            records_to_insert = [
+                (user_id, exercise_id, calculated_weight, default_reps, default_sets, calculated_weight * 2)
+                for exercise_id in exercise_ids
+            ]
+            
+            await conn.copy_records_to_table(
+                'user_generated_exercises',
+                records=records_to_insert,
+                columns=('user_id', 'exercise_id', 'weight_kg', 'reps', 'sets', 'one_rm_calculated')
+            )
+        
+        return True
+    except Exception as e:
+        print(f"Error storing user generated exercises: {e}")
+        return False
+
+async def get_user_generated_exercises(conn: asyncpg.Connection, user_id: int) -> List[asyncpg.Record]:
+    """
+    Fetches user's generated exercises with their calculated weights, reps, and sets.
+    """
+    query = """
+    SELECT 
+        uge.id,
+        uge.exercise_id,
+        e.name,
+        e.description,
+        e.video_url,
+        fa.name as primary_focus_area,
+        uge.weight_kg,
+        uge.reps,
+        uge.sets,
+        uge.one_rm_calculated,
+        uge.generated_at,
+        uge.updated_at
+    FROM user_generated_exercises uge
+    JOIN exercises e ON uge.exercise_id = e.id
+    LEFT JOIN focus_areas fa ON e.primary_focus_area_id = fa.id
+    WHERE uge.user_id = $1
+    ORDER BY uge.generated_at DESC;
+    """
+    return await conn.fetch(query, user_id)
+
+async def update_user_generated_exercise(
+    conn: asyncpg.Connection, 
+    user_id: int, 
+    exercise_id: int, 
+    weight_kg: Optional[float] = None,
+    reps: Optional[int] = None,
+    sets: Optional[int] = None
+) -> Optional[asyncpg.Record]:
+    """
+    Updates user's generated exercise with new weight, reps, or sets values.
+    Only updates the fields that are provided (not None).
+    """
+    # Build dynamic SET clause based on provided values
+    set_clauses = []
+    params = [user_id, exercise_id]
+    param_index = 3
+    
+    if weight_kg is not None:
+        set_clauses.append(f"weight_kg = ${param_index}")
+        params.append(weight_kg)
+        param_index += 1
+    
+    if reps is not None:
+        set_clauses.append(f"reps = ${param_index}")
+        params.append(reps)
+        param_index += 1
+    
+    if sets is not None:
+        set_clauses.append(f"sets = ${param_index}")
+        params.append(sets)
+        param_index += 1
+    
+    if not set_clauses:
+        return None  # Nothing to update
+    
+    # Always update the updated_at timestamp
+    set_clauses.append("updated_at = NOW()")
+    
+    query = f"""
+    UPDATE user_generated_exercises 
+    SET {', '.join(set_clauses)}
+    WHERE user_id = $1 AND exercise_id = $2
+    RETURNING id, exercise_id, weight_kg, reps, sets, updated_at;
+    """
+    
+    # Execute update and get the updated record
+    updated_record = await conn.fetchrow(query, *params)
+    
+    if not updated_record:
+        return None
+    
+    # Fetch the complete record with exercise details
+    complete_query = """
+    SELECT 
+        uge.id,
+        uge.exercise_id,
+        e.name,
+        uge.weight_kg,
+        uge.reps,
+        uge.sets,
+        uge.updated_at
+    FROM user_generated_exercises uge
+    JOIN exercises e ON uge.exercise_id = e.id
+    WHERE uge.user_id = $1 AND uge.exercise_id = $2;
+    """
+    
+    return await conn.fetchrow(complete_query, user_id, exercise_id)
 
 async def set_active_day_for_user(conn: asyncpg.Connection, user_id: int, day_number: int) -> bool:
     """

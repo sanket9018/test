@@ -123,14 +123,14 @@ def generate_full_sql_script():
     DROP FUNCTION IF EXISTS assign_default_routines_to_user();
 
     DROP TABLE IF EXISTS 
-        user_routine_day_focus_areas, user_routine_days, user_routines,
+        user_routine_day_focus_areas, user_routine_day_exercises, user_routine_days, user_routines,
         routine_day_focus_areas, routine_days,
         weight_history, body_measurement_history, user_workout_days,
         workout_logs, workout_plan_exercises, workout_plans, 
         user_goals, user_focus_areas, user_health_issues, user_equipment, 
         exercise_focus_areas, exercise_equipment, exercise_contraindications, exercise_fitness_levels,
         exercises, users, routines, goals, motivations, user_motivations, focus_areas, health_issues, equipment, equipment_types,
-        token_blocklist, user_login_history CASCADE;
+        token_blocklist, user_login_history, user_generated_exercises CASCADE;
 
     DROP TYPE IF EXISTS 
         gender_enum, fitness_level_enum, activity_level_enum, day_of_week_enum, 
@@ -365,6 +365,28 @@ def generate_full_sql_script():
     CREATE TABLE IF NOT EXISTS token_blocklist (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, access_token TEXT NOT NULL UNIQUE, refresh_token TEXT NOT NULL, exp_time TIMESTAMP WITH TIME ZONE NOT NULL, revoked BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TRIGGER trigger_set_updated_at_token_blocklist BEFORE UPDATE ON token_blocklist FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     CREATE TABLE IF NOT EXISTS user_login_history (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, login_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, logout_time TIMESTAMP WITH TIME ZONE, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    
+    -- ========= USER GENERATED EXERCISES TABLE =========
+    CREATE TABLE user_generated_exercises (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        weight_kg DECIMAL(6, 2) NOT NULL DEFAULT 0.00,
+        reps INTEGER NOT NULL DEFAULT 12,
+        sets INTEGER NOT NULL DEFAULT 3,
+        one_rm_calculated DECIMAL(6, 2) NOT NULL DEFAULT 0.00,
+        generated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, exercise_id)
+    );
+    
+    CREATE INDEX idx_user_generated_exercises_user_id ON user_generated_exercises(user_id);
+    CREATE INDEX idx_user_generated_exercises_exercise_id ON user_generated_exercises(exercise_id);
+    
+    CREATE TRIGGER trigger_user_generated_exercises_updated_at
+    BEFORE UPDATE ON user_generated_exercises
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
     
     -- ========= INSERT INITIAL LOOKUP AND TEMPLATE DATA =========
     -- Basic Lookups

@@ -509,6 +509,25 @@ async def generate_workout_plan(
     # Final shuffle for better UX while maintaining focus area coverage
     random.shuffle(final_exercises)
     
+    # Step 6: Store generated exercises with calculated KG, REPS, SETS
+    exercise_ids = [ex['id'] for ex in final_exercises]
+    
+    # Get user's physical data for 1RM calculation from the database query result
+    user_physical_data = {
+        'current_weight_kg': float(user_data.get('current_weight_kg', 70.0)) if user_data.get('current_weight_kg') else 70.0,
+        'height_cm': user_data.get('height_cm', 170),
+        'age': user_data.get('age', 25),
+        'fitness_level': user_data.get('fitness_level', 'intermediate')
+    }
+    
+    # Store the generated exercises with calculated values
+    storage_success = await db_queries.store_user_generated_exercises(
+        db, user_id, exercise_ids, user_physical_data
+    )
+    
+    if not storage_success:
+        print(f"Warning: Failed to store generated exercises for user {user_id}")
+    
     return [dict(record) for record in final_exercises]
 
 
@@ -761,6 +780,107 @@ async def update_user_active_day(
 
     # 4. Return a success response
     return success_response({}, message=f"Successfully set active workout to Day {day_update.day_number}", status_code=201)
+
+
+@router.get("/user/me/generated-exercises", response_model=UserGeneratedExercisesListResponse)
+async def get_user_generated_exercises(
+    request: Request,
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Fetches the user's most recently generated exercises with their calculated KG, REPS, and SETS.
+    This endpoint returns the exercises that were generated and stored after the last /generate call.
+    """
+    # Authenticate the user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(db, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # Fetch user's generated exercises
+    exercises_data = await db_queries.get_user_generated_exercises(db, user_id)
+    
+    if not exercises_data:
+        return UserGeneratedExercisesListResponse(exercises=[])
+    
+    # Transform the data to match our response model
+    exercises = []
+    for record in exercises_data:
+        exercises.append(UserGeneratedExerciseResponse(
+            id=record['id'],
+            exercise_id=record['exercise_id'],
+            name=record['name'],
+            description=record.get('description'),
+            video_url=record.get('video_url'),
+            primary_focus_area=record.get('primary_focus_area'),
+            weight_kg=float(record['weight_kg']),
+            reps=record['reps'],
+            sets=record['sets'],
+            one_rm_calculated=float(record['one_rm_calculated']),
+            generated_at=record['generated_at'],
+            updated_at=record['updated_at']
+        ))
+    
+    return UserGeneratedExercisesListResponse(exercises=exercises)
+
+
+@router.patch("/user/me/generated-exercises/{exercise_id}", response_model=UpdateUserGeneratedExerciseResponse)
+async def update_user_generated_exercise(
+    exercise_id: int,
+    update_data: UpdateUserGeneratedExerciseRequest,
+    request: Request,
+    db: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Updates the weight, reps, or sets for a specific user's generated exercise.
+    Only the provided fields will be updated.
+    """
+    # Authenticate the user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(db, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+
+    user_id = token_entry['user_id']
+
+    # Extract only the fields that were provided in the request
+    update_fields = update_data.model_dump(exclude_unset=True)
+    
+    if not update_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one field (weight_kg, reps, or sets) must be provided for update"
+        )
+
+    # Update the exercise
+    updated_record = await db_queries.update_user_generated_exercise(
+        db,
+        user_id=user_id,
+        exercise_id=exercise_id,
+        weight_kg=update_fields.get('weight_kg'),
+        reps=update_fields.get('reps'),
+        sets=update_fields.get('sets')
+    )
+
+    if not updated_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Generated exercise with ID {exercise_id} not found for this user"
+        )
+
+    # Return the updated exercise data
+    return UpdateUserGeneratedExerciseResponse(
+        id=updated_record['id'],
+        exercise_id=updated_record['exercise_id'],
+        name=updated_record['name'],
+        weight_kg=float(updated_record['weight_kg']),
+        reps=updated_record['reps'],
+        sets=updated_record['sets'],
+        updated_at=updated_record['updated_at'],
+        message="Exercise updated successfully"
+    )
 
 
 @router.patch("/user/me/routine/swap-days", response_model=RoutineDaySwapResponse)
