@@ -568,7 +568,7 @@ def generate_full_sql_script():
             continue
         processed_exercise_names.add(ex_name)
 
-        ex_desc = sql_escape(ex.get('description', ''))
+        ex_desc = sql_escape(ex.get('desc', ''))
         
         type_mapping = {"Strength Training": "strength", "Muscle Growth": "strength", "Calorie Burning": "cardio"}
         json_types = ex.get('type', [])
