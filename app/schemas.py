@@ -418,17 +418,17 @@ class ExercisesListResponse(BaseModel):
     """Response model for the exercises list endpoint."""
     exercises: List[ExerciseItem]
 
-class RoutineDaySwapRequest(BaseModel):
-    """Schema for swapping content between two routine days."""
-    from_day_number: int = Field(..., ge=1, le=7, description="Source day number to swap from")
-    to_day_number: int = Field(..., ge=1, le=7, description="Target day number to swap to")
+class RoutineDayReorderRequest(BaseModel):
+    """Schema for reordering routine days via drag and drop."""
+    source_day_number: int = Field(..., ge=1, le=7, description="Day number being dragged")
+    target_position: int = Field(..., ge=1, le=7, description="Position where the day is being dropped")
 
-class RoutineDaySwapResponse(BaseModel):
-    """Response model for successful day swap operation."""
+class RoutineDayReorderResponse(BaseModel):
+    """Response model for successful day reorder operation."""
     message: str
-    from_day_number: int
-    to_day_number: int
-    swapped_content_type: str  # "focus_areas", "direct_exercises", or "mixed"
+    source_day_number: int
+    target_position: int
+    affected_days: List[int]  # List of day numbers that were affected by the reorder
 
 class UserGeneratedExerciseResponse(BaseModel):
     """Response model for user's generated exercises with calculated values."""

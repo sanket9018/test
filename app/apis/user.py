@@ -883,23 +883,23 @@ async def update_user_generated_exercise(
     )
 
 
-@router.patch("/user/me/routine/swap-days", response_model=RoutineDaySwapResponse)
-async def swap_routine_days(
-    swap_request: RoutineDaySwapRequest,
+@router.patch("/user/me/routine/reorder-days", response_model=RoutineDayReorderResponse)
+async def reorder_routine_days(
+    reorder_request: RoutineDayReorderRequest,
     request: Request,
     conn: asyncpg.Connection = Depends(get_db)
 ):
     """
-    Swaps the content between two routine days for the authenticated user's active routine.
+    Reorders routine days using drag-and-drop logic for the authenticated user's active routine.
     
-    This endpoint allows users to exchange workout content between any two days in their routine.
-    It handles all combinations:
-    - Focus areas to focus areas
-    - Direct exercises to direct exercises  
-    - Focus areas to direct exercises
-    - Direct exercises to focus areas
+    When dragging a day to a new position, all days between the source and target shift accordingly.
+    For example, dragging day 3 to position 1 in a 5-day routine:
+    - Day 3 content goes to day 1
+    - Day 1 content shifts to day 2
+    - Day 2 content shifts to day 3
+    - Days 4 and 5 remain unchanged
     
-    The swap operation is atomic - either both days are updated successfully or no changes are made.
+    The reorder operation is atomic - either all affected days are updated successfully or no changes are made.
     """
     # 1. Authenticate the user
     access_token = await get_access_token_from_header(request)
@@ -909,31 +909,33 @@ async def swap_routine_days(
 
     user_id = token_entry['user_id']
 
-    # 2. Validate that the days are different
-    if swap_request.from_day_number == swap_request.to_day_number:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot swap a day with itself. Please provide different day numbers."
+    # 2. Validate the request
+    if reorder_request.source_day_number == reorder_request.target_position:
+        return RoutineDayReorderResponse(
+            message="No reordering needed - source and target are the same",
+            source_day_number=reorder_request.source_day_number,
+            target_position=reorder_request.target_position,
+            affected_days=[]
         )
 
-    # 3. Perform the swap operation
+    # 3. Perform the reorder operation
     try:
-        swap_result = await db_queries.swap_routine_days_content(
-            conn, user_id, swap_request.from_day_number, swap_request.to_day_number
+        reorder_result = await db_queries.reorder_routine_days_content(
+            conn, user_id, reorder_request.source_day_number, reorder_request.target_position
         )
         
-        if not swap_result.get("success"):
+        if not reorder_result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to swap routine days due to an unexpected error."
+                detail="Failed to reorder routine days due to an unexpected error."
             )
 
         # 4. Return success response
-        return RoutineDaySwapResponse(
-            message=f"Successfully swapped content between Day {swap_request.from_day_number} and Day {swap_request.to_day_number}",
-            from_day_number=swap_request.from_day_number,
-            to_day_number=swap_request.to_day_number,
-            swapped_content_type=swap_result["swapped_content_type"]
+        return RoutineDayReorderResponse(
+            message=reorder_result["message"],
+            source_day_number=reorder_result["source_day_number"],
+            target_position=reorder_result["target_position"],
+            affected_days=reorder_result["affected_days"]
         )
 
     except ValueError as ve:

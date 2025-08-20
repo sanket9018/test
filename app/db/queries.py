@@ -1153,6 +1153,155 @@ async def swap_routine_days_content(conn: asyncpg.Connection, user_id: int, from
         }
 
 
+async def reorder_routine_days_content(conn: asyncpg.Connection, user_id: int, source_day: int, target_position: int) -> Dict[str, Any]:
+    """
+    Reorders routine days using drag-and-drop logic. When dragging a day to a new position,
+    all days between the source and target shift accordingly.
+    
+    Example: If dragging day 3 to position 1 in a 5-day routine:
+    - Day 3 content goes to day 1
+    - Day 1 content shifts to day 2
+    - Day 2 content shifts to day 3
+    - Days 4 and 5 remain unchanged
+    
+    Returns information about the reorder operation.
+    """
+    if source_day == target_position:
+        return {
+            "success": True,
+            "message": "No reordering needed - source and target are the same",
+            "affected_days": []
+        }
+    
+    async with conn.transaction():
+        # Step 1: Get the user's active routine
+        active_routine_query = """
+        SELECT ur.id as user_routine_id
+        FROM user_routines ur
+        WHERE ur.user_id = $1 AND ur.is_active = TRUE
+        """
+        active_routine = await conn.fetchrow(active_routine_query, user_id)
+        
+        if not active_routine:
+            raise ValueError("No active routine found for user")
+        
+        user_routine_id = active_routine['user_routine_id']
+        
+        # Step 2: Get all days data that will be affected
+        if source_day < target_position:
+            # Moving forward: get days from source to target
+            affected_days = list(range(source_day, target_position + 1))
+        else:
+            # Moving backward: get days from target to source
+            affected_days = list(range(target_position, source_day + 1))
+        
+        days_query = """
+        SELECT 
+            urd.id,
+            urd.day_number,
+            urd.exercise_mode,
+            -- Focus areas
+            COALESCE(
+                array_agg(DISTINCT urdfa.focus_area_id) FILTER (WHERE urdfa.focus_area_id IS NOT NULL), 
+                '{}'::int[]
+            ) as focus_area_ids,
+            -- Direct exercises
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'exercise_id', urde.exercise_id,
+                        'order_in_day', urde.order_in_day
+                    ) ORDER BY urde.order_in_day
+                ) FILTER (WHERE urde.exercise_id IS NOT NULL),
+                '[]'::json
+            ) as direct_exercises
+        FROM user_routine_days urd
+        LEFT JOIN user_routine_day_focus_areas urdfa ON urd.id = urdfa.user_routine_day_id
+        LEFT JOIN user_routine_day_exercises urde ON urd.id = urde.user_routine_day_id
+        WHERE urd.user_routine_id = $1 AND urd.day_number = ANY($2::int[])
+        GROUP BY urd.id, urd.day_number, urd.exercise_mode
+        ORDER BY urd.day_number
+        """
+        
+        days_data = await conn.fetch(days_query, user_routine_id, affected_days)
+        
+        if len(days_data) != len(affected_days):
+            raise ValueError(f"Could not find all required days in active routine")
+        
+        # Step 3: Create mapping of day_number to data
+        day_data_map = {row['day_number']: row for row in days_data}
+        
+        # Step 4: Calculate the new arrangement
+        source_data = day_data_map[source_day]
+        
+        if source_day < target_position:
+            # Moving forward: shift days backward
+            new_arrangement = {}
+            for day in affected_days:
+                if day == source_day:
+                    continue  # Skip source, it goes to target
+                elif day <= target_position:
+                    new_arrangement[day - 1] = day_data_map[day]
+            new_arrangement[target_position] = source_data
+        else:
+            # Moving backward: shift days forward
+            new_arrangement = {}
+            for day in affected_days:
+                if day == source_day:
+                    continue  # Skip source, it goes to target
+                elif day >= target_position:
+                    new_arrangement[day + 1] = day_data_map[day]
+            new_arrangement[target_position] = source_data
+        
+        # Step 5: Clear existing data for affected days
+        affected_day_ids = [day_data_map[day]['id'] for day in affected_days]
+        await conn.execute(
+            "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = ANY($1::int[])",
+            affected_day_ids
+        )
+        await conn.execute(
+            "DELETE FROM user_routine_day_exercises WHERE user_routine_day_id = ANY($1::int[])",
+            affected_day_ids
+        )
+        
+        # Step 6: Apply the new arrangement
+        for new_day_number, data in new_arrangement.items():
+            target_day_id = day_data_map[new_day_number]['id']
+            
+            # Update exercise mode
+            await conn.execute(
+                "UPDATE user_routine_days SET exercise_mode = $1 WHERE id = $2",
+                data['exercise_mode'], target_day_id
+            )
+            
+            # Insert focus areas
+            if data['focus_area_ids']:
+                focus_area_records = [(target_day_id, fa_id) for fa_id in data['focus_area_ids']]
+                await conn.copy_records_to_table(
+                    'user_routine_day_focus_areas',
+                    records=focus_area_records,
+                    columns=('user_routine_day_id', 'focus_area_id')
+                )
+            
+            # Insert direct exercises
+            direct_exercises = json.loads(data['direct_exercises']) if isinstance(data['direct_exercises'], str) else data['direct_exercises']
+            if direct_exercises:
+                exercise_records = [(target_day_id, ex['exercise_id'], ex['order_in_day']) for ex in direct_exercises]
+                await conn.copy_records_to_table(
+                    'user_routine_day_exercises',
+                    records=exercise_records,
+                    columns=('user_routine_day_id', 'exercise_id', 'order_in_day')
+                )
+        
+        return {
+            "success": True,
+            "message": f"Successfully moved day {source_day} to position {target_position}",
+            "source_day_number": source_day,
+            "target_position": target_position,
+            "affected_days": affected_days
+        }
+
+
 async def add_day_to_user_routine(conn: asyncpg.Connection, user_id: int, user_routine_id: int) -> Optional[asyncpg.Record]:
     """
     Adds a new, empty day to a specific user routine.
