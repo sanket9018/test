@@ -348,7 +348,8 @@ async def get_recommended_exercises(
     equipment_ids: List[int],
     health_issue_ids: List[int],
     exercises_per_focus: int,
-    total_limit: int
+    total_limit: int,
+    objective: Optional[str] = None
 ) -> List[asyncpg.Record]:
     """
     Selects a balanced, personalized set of exercises, ensuring no duplicates.
@@ -386,6 +387,7 @@ async def get_recommended_exercises(
                 SELECT 1 FROM exercise_contraindications ec
                 WHERE ec.exercise_id = e.id AND ec.health_issue_id = ANY($4::int[])
             )
+            AND ($7::text IS NULL OR e.exercise_type::text = $7::text)
     )
     -- FINAL SELECTION: This part is rewritten to handle duplicates.
     SELECT id, name, description, video_url, primary_focus_area
@@ -407,7 +409,8 @@ async def get_recommended_exercises(
         equipment_ids,          # $3
         health_issue_ids,       # $4
         exercises_per_focus,    # $5
-        total_limit             # $6
+        total_limit,            # $6
+        objective               # $7
     )
     
 
@@ -415,6 +418,156 @@ async def get_recommended_exercises(
 async def get_equipment_id_by_name(conn: asyncpg.Connection, name: str) -> Optional[int]:
     """Fetches the ID of an equipment item by its name."""
     return await conn.fetchval("SELECT id FROM equipment WHERE name = $1", name)
+
+
+async def get_alternative_exercises(
+    conn: asyncpg.Connection,
+    original_exercise_id: int,
+    user_id: int,
+    limit: int = 10
+) -> List[asyncpg.Record]:
+    """
+    Finds alternative exercises based on an original exercise ID and user's profile.
+    
+    The algorithm considers:
+    1. Shared focus areas with the original exercise
+    2. User's fitness level compatibility
+    3. User's available equipment
+    4. User's health issues (contraindications)
+    5. Excludes the original exercise from results
+    
+    Returns exercises sorted by similarity score (number of shared focus areas).
+    """
+    query = """
+    WITH OriginalExerciseFocusAreas AS (
+        -- Get all focus areas for the original exercise
+        SELECT efa.focus_area_id, fa.name as focus_area_name
+        FROM exercise_focus_areas efa
+        JOIN focus_areas fa ON efa.focus_area_id = fa.id
+        WHERE efa.exercise_id = $1
+    ),
+    UserProfile AS (
+        -- Get user's profile data
+        SELECT 
+            u.fitness_level,
+            COALESCE(array_agg(DISTINCT ue.equipment_id) FILTER (WHERE ue.equipment_id IS NOT NULL), ARRAY[]::int[]) as equipment_ids,
+            COALESCE(array_agg(DISTINCT uhi.health_issue_id) FILTER (WHERE uhi.health_issue_id IS NOT NULL), ARRAY[]::int[]) as health_issue_ids
+        FROM users u
+        LEFT JOIN user_equipment ue ON u.id = ue.user_id
+        LEFT JOIN user_health_issues uhi ON u.id = uhi.user_id
+        WHERE u.id = $2
+        GROUP BY u.id, u.fitness_level
+    ),
+    AlternativeExercises AS (
+        -- Find exercises that share focus areas with the original
+        SELECT DISTINCT
+            e.id,
+            e.name,
+            e.description,
+            e.video_url,
+            pfa.name as primary_focus_area,
+            -- Calculate similarity score based on shared focus areas
+            (
+                SELECT COUNT(*)
+                FROM exercise_focus_areas efa2
+                WHERE efa2.exercise_id = e.id
+                AND efa2.focus_area_id IN (
+                    SELECT focus_area_id FROM OriginalExerciseFocusAreas
+                )
+            )::float / GREATEST(
+                (
+                    SELECT COUNT(*) FROM OriginalExerciseFocusAreas
+                ),
+                (
+                    SELECT COUNT(*) FROM exercise_focus_areas efa3 WHERE efa3.exercise_id = e.id
+                )
+            ) as similarity_score,
+            -- Get shared focus area names
+            (
+                SELECT array_agg(fa.name)
+                FROM exercise_focus_areas efa4
+                JOIN focus_areas fa ON efa4.focus_area_id = fa.id
+                WHERE efa4.exercise_id = e.id
+                AND efa4.focus_area_id IN (
+                    SELECT focus_area_id FROM OriginalExerciseFocusAreas
+                )
+            ) as shared_focus_areas
+        FROM exercises e
+        JOIN exercise_focus_areas efa ON e.id = efa.exercise_id
+        LEFT JOIN focus_areas pfa ON e.primary_focus_area_id = pfa.id
+        CROSS JOIN UserProfile up
+        WHERE
+            -- Exclude the original exercise
+            e.id != $1
+            -- Must share at least one focus area
+            AND EXISTS (
+                SELECT 1 FROM exercise_focus_areas efa_shared
+                WHERE efa_shared.exercise_id = e.id
+                AND efa_shared.focus_area_id IN (
+                    SELECT focus_area_id FROM OriginalExerciseFocusAreas
+                )
+            )
+            -- Must be compatible with user's fitness level
+            AND EXISTS (
+                SELECT 1 FROM exercise_fitness_levels efl
+                WHERE efl.exercise_id = e.id 
+                AND efl.fitness_level = up.fitness_level::fitness_level_enum
+            )
+            -- Must be compatible with user's equipment (if user has equipment preferences)
+            AND (
+                array_length(up.equipment_ids, 1) IS NULL
+                OR EXISTS (
+                    SELECT 1 FROM exercise_equipment ee
+                    WHERE ee.exercise_id = e.id 
+                    AND ee.equipment_id = ANY(up.equipment_ids)
+                )
+            )
+            -- Must not be contraindicated by user's health issues
+            AND NOT EXISTS (
+                SELECT 1 FROM exercise_contraindications ec
+                WHERE ec.exercise_id = e.id 
+                AND ec.health_issue_id = ANY(up.health_issue_ids)
+            )
+    )
+    SELECT 
+        id,
+        name,
+        description,
+        video_url,
+        primary_focus_area,
+        similarity_score,
+        COALESCE(shared_focus_areas, ARRAY[]::text[]) as shared_focus_areas
+    FROM AlternativeExercises
+    ORDER BY similarity_score DESC, name ASC
+    LIMIT $3;
+    """
+    
+    return await conn.fetch(query, original_exercise_id, user_id, limit)
+
+
+async def get_exercise_details(conn: asyncpg.Connection, exercise_id: int) -> Optional[asyncpg.Record]:
+    """
+    Gets detailed information about a specific exercise including its focus areas.
+    """
+    query = """
+    SELECT 
+        e.id,
+        e.name,
+        e.description,
+        e.video_url,
+        pfa.name as primary_focus_area,
+        (
+            SELECT array_agg(fa.name)
+            FROM exercise_focus_areas efa
+            JOIN focus_areas fa ON efa.focus_area_id = fa.id
+            WHERE efa.exercise_id = e.id
+        ) as focus_areas
+    FROM exercises e
+    LEFT JOIN focus_areas pfa ON e.primary_focus_area_id = pfa.id
+    WHERE e.id = $1;
+    """
+    
+    return await conn.fetchrow(query, exercise_id)
 
 
 async def get_profile_and_active_day_focus(conn: asyncpg.Connection, user_id: int):
@@ -578,7 +731,8 @@ async def get_profile_for_workout_generation(conn: asyncpg.Connection, user_id: 
         u.duration,
         u.current_weight_kg,
         u.height_cm,
-        u.age
+        u.age,
+        u.objective
     FROM UserBaseProfile ubp
     LEFT JOIN TodayWorkoutData twd ON 1=1
     JOIN users u ON u.id = ubp.user_id
@@ -882,6 +1036,47 @@ async def update_user_generated_exercise(
     """
     
     return await conn.fetchrow(complete_query, user_id, exercise_id)
+
+async def clear_user_generated_exercises(conn: asyncpg.Connection, user_id: int) -> bool:
+    """
+    Clears all generated exercises for a user.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        await conn.execute("DELETE FROM user_generated_exercises WHERE user_id = $1", user_id)
+        return True
+    except Exception:
+        return False
+
+async def get_user_routine_day_exercises(conn: asyncpg.Connection, user_id: int) -> List[asyncpg.Record]:
+    """
+    Fetches exercises from active routine days for a user.
+    This includes exercises that are set directly on routine days (direct_exercises mode).
+    """
+    query = """
+    SELECT DISTINCT
+        urde.exercise_id,
+        e.name,
+        e.description,
+        e.video_url,
+        fa.name as primary_focus_area,
+        urde.order_in_day,
+        urd.day_number,
+        r.name as routine_name
+    FROM user_routine_day_exercises urde
+    JOIN user_routine_days urd ON urde.user_routine_day_id = urd.id
+    JOIN user_routines ur ON urd.user_routine_id = ur.id
+    JOIN routines r ON ur.routine_id = r.id
+    JOIN exercises e ON urde.exercise_id = e.id
+    LEFT JOIN focus_areas fa ON e.primary_focus_area_id = fa.id
+    WHERE ur.user_id = $1 
+      AND ur.is_active = true
+      AND urd.exercise_mode = 'direct_exercises'
+    ORDER BY urd.day_number, urde.order_in_day;
+    """
+    return await conn.fetch(query, user_id)
 
 async def set_active_day_for_user(conn: asyncpg.Connection, user_id: int, day_number: int) -> bool:
     """

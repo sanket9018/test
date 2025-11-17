@@ -70,7 +70,10 @@ class UserOnboardingCreate(BaseModel):
     workouts_per_week: int = Field(..., ge=1, le=7)
     
     # This ID specifies which of the 7 default routines should be marked as active.
-    routine_id: int 
+    routine_id: int
+    
+    # Objective can be one of: muscle, strength, cardio
+    objective: str = Field(...) 
     
     motivation_ids: List[int]
     goal_ids: List[int]
@@ -94,6 +97,7 @@ class UserOnboardingCreate(BaseModel):
                 "activity_level": "lightly_active",
                 "workouts_per_week": 3,
                 "routine_id": 1,  # User wants to start with "3 Day Classic"
+                "objective": "muscle",
                 "motivation_ids": [1, 2],
                 "goal_ids": [1, 3],
                 "focus_area_ids": [1, 2, 5],
@@ -203,7 +207,7 @@ class UserProfileUpdate(BaseModel):
     rapge_ranges: Optional[bool] = None
     duration: Optional[int] = None
     rest_time: Optional[int] = None
-    objective: Optional[str] = None
+    objective: Optional[str] = Field(None)
 
 class WorkoutGenerationRequest(BaseSchema):
     workout_days: List[DayOfWeekEnum] = Field(..., min_items=1, max_items=7)
@@ -465,3 +469,216 @@ class UpdateUserGeneratedExerciseResponse(BaseModel):
     sets: int
     updated_at: datetime
     message: str
+
+# Custom Exercise Schemas
+class AddCustomExerciseRequest(BaseModel):
+    """Request model for adding a custom exercise to temporary storage."""
+    exercise_id: int = Field(..., gt=0, description="ID of the exercise to add as custom")
+
+class CustomExerciseResponse(BaseModel):
+    """Response model for custom exercise with calculated values."""
+    id: int
+    exercise_id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    primary_focus_area: Optional[str] = None
+    weight_kg: float
+    reps: int
+    sets: int
+    one_rm_calculated: float
+    added_at: datetime
+    is_custom: bool = True  # Flag to identify custom exercises in combined responses
+
+class AddCustomExerciseResponse(BaseModel):
+    """Response model for successfully added custom exercise."""
+    message: str
+    exercise: CustomExerciseResponse
+
+class RoutineDayExerciseResponse(BaseModel):
+    """Response model for exercises from routine days."""
+    exercise_id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    primary_focus_area: Optional[str] = None
+    order_in_day: int
+    day_number: int
+    routine_name: str
+
+class CombinedExercisesResponse(BaseModel):
+    """Response model combining generated exercises, custom exercises, and routine day exercises."""
+    generated_exercises: List[UserGeneratedExerciseResponse]
+    custom_exercises: List[CustomExerciseResponse]
+    routine_day_exercises: List[RoutineDayExerciseResponse]
+    total_count: int
+
+# Alternative Exercises Schemas
+class AlternativeExercisesRequest(BaseModel):
+    """Request model for finding alternative exercises based on an exercise ID."""
+    exercise_id: int = Field(..., gt=0, description="ID of the exercise to find alternatives for")
+
+class AlternativeExerciseResponse(BaseModel):
+    """Response model for a single alternative exercise."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    video_url: Optional[str] = None
+    primary_focus_area: Optional[str] = None
+    shared_focus_areas: List[str] = []  # Focus areas shared with the original exercise
+    similarity_score: float = Field(..., ge=0, le=1, description="Similarity score (0-1) with original exercise")
+
+class AlternativeExercisesResponse(BaseModel):
+    """Response model for alternative exercises list."""
+    original_exercise: Dict[str, Any]
+    alternatives: List[AlternativeExerciseResponse]
+    total_count: int
+
+# Workout Session Management Schemas
+class WorkoutStatusEnum(str, Enum):
+    active = "active"
+    completed = "completed"
+    cancelled = "cancelled"
+
+class StartWorkoutRequest(BaseModel):
+    """Request model for starting a workout session."""
+    exercises: List[Dict[str, Any]] = Field(..., description="List of exercises with their planned sets, reps, and weights")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "exercises": [
+                    {
+                        "exercise_id": 1,
+                        "planned_sets": 3,
+                        "planned_reps": 12,
+                        "planned_weight_kg": 20.0
+                    },
+                    {
+                        "exercise_id": 2,
+                        "planned_sets": 4,
+                        "planned_reps": 10,
+                        "planned_weight_kg": 15.0
+                    }
+                ]
+            }
+        }
+
+class WorkoutSessionResponse(BaseModel):
+    """Response model for workout session."""
+    id: int
+    user_id: int
+    status: WorkoutStatusEnum
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    total_duration_seconds: Optional[int] = None
+    notes: Optional[str] = None
+
+class WorkoutSessionExerciseResponse(BaseModel):
+    """Response model for workout session exercise."""
+    id: int
+    workout_session_id: int
+    exercise_id: int
+    exercise_name: str
+    planned_sets: int
+    planned_reps: int
+    planned_weight_kg: float
+    order_in_workout: int
+    is_completed: bool
+    created_at: datetime
+
+class StartWorkoutResponse(BaseModel):
+    """Response model for starting a workout."""
+    message: str
+    workout_session: WorkoutSessionResponse
+    exercises: List[WorkoutSessionExerciseResponse]
+
+class LogSetRequest(BaseModel):
+    """Request model for logging a set."""
+    workout_session_exercise_id: int = Field(..., gt=0, description="ID of the workout session exercise")
+    set_number: int = Field(..., ge=1, le=20, description="Set number (1-based)")
+    weight_kg: float = Field(..., ge=0, le=1000, description="Weight used in kg")
+    reps_completed: int = Field(..., ge=0, le=100, description="Number of reps completed")
+    duration_seconds: Optional[int] = Field(None, ge=0, description="Duration of the set in seconds")
+    rest_time_seconds: Optional[int] = Field(None, ge=0, description="Rest time after the set in seconds")
+    notes: Optional[str] = Field(None, max_length=500, description="Optional notes for the set")
+
+class WorkoutLogResponse(BaseModel):
+    """Response model for workout log entry."""
+    id: int
+    user_id: int
+    workout_session_id: int
+    workout_session_exercise_id: int
+    exercise_id: int
+    exercise_name: str
+    set_number: int
+    weight_kg: float
+    reps_completed: int
+    duration_seconds: Optional[int] = None
+    rest_time_seconds: Optional[int] = None
+    notes: Optional[str] = None
+    logged_at: datetime
+
+class LogSetResponse(BaseModel):
+    """Response model for logged set."""
+    message: str
+    workout_log: WorkoutLogResponse
+
+class CompleteWorkoutRequest(BaseModel):
+    """Request model for completing a workout."""
+    notes: Optional[str] = Field(None, max_length=1000, description="Optional notes for the workout")
+
+class WorkoutHistoryResponse(BaseModel):
+    """Response model for workout history entry."""
+    id: int
+    user_id: int
+    workout_session_id: int
+    workout_date: str  # Date as string (YYYY-MM-DD)
+    total_exercises: int
+    total_sets: int
+    total_duration_seconds: int
+    calories_burned: int
+    notes: Optional[str] = None
+    created_at: datetime
+
+class CompleteWorkoutResponse(BaseModel):
+    """Response model for completed workout."""
+    message: str
+    workout_session: WorkoutSessionResponse
+    workout_history: WorkoutHistoryResponse
+
+class WorkoutStatusResponse(BaseModel):
+    """Response model for workout status check."""
+    has_active_workout: bool
+    active_workout: Optional[WorkoutSessionResponse] = None
+    exercises: Optional[List[WorkoutSessionExerciseResponse]] = None
+
+class ExerciseSummary(BaseModel):
+    """Summary of an exercise in workout history."""
+    exercise_id: int
+    exercise_name: str
+    total_sets: int
+    sets_summary: str  # e.g., "4 sets × 10 reps at 9kg"
+    
+class WorkoutSessionSummary(BaseModel):
+    """Summary of a workout session."""
+    workout_session_id: int
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    total_duration_seconds: int
+    exercises: List[ExerciseSummary]
+    notes: Optional[str] = None
+
+class DailyWorkoutHistory(BaseModel):
+    """Workout history grouped by date."""
+    workout_date: str  # Date as string (YYYY-MM-DD)
+    total_workouts: int
+    total_exercises: int
+    total_sets: int
+    total_duration_seconds: int
+    workout_sessions: List[WorkoutSessionSummary]
+
+class WorkoutHistoryListResponse(BaseModel):
+    """Response model for workout history list grouped by date."""
+    history: List[DailyWorkoutHistory]
+    total_count: int

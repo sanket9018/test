@@ -6,6 +6,8 @@ from app.schemas import *
 from app.database import get_db
 from app.utils import hash_password, verify_password, success_response, error_response
 from app.db import queries as db_queries
+from app.db.queries import clear_user_generated_exercises, get_user_routine_day_exercises
+from app.db.custom_exercises import add_custom_exercise, get_user_custom_exercises, clear_user_custom_exercises
 from app.security import create_access_token, create_refresh_token, SECRET_KEY, ALGORITHM, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 import jwt
 from app.helpers.token import get_access_token_from_header
@@ -121,7 +123,7 @@ async def read_user(
     user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
     user_dict['duration'] = user_dict.get('duration', 30)
     user_dict['rest_time'] = user_dict.get('rest_time', 30)
-    user_dict['objective'] = user_dict.get('objective', 'Muscle growth')
+    user_dict['objective'] = user_dict.get('objective', 'muscle')
 
     return user_dict
 
@@ -191,7 +193,7 @@ async def update_user_profile(
     user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
     user_dict['duration'] = user_dict.get('duration', 30)
     user_dict['rest_time'] = user_dict.get('rest_time', 30)
-    user_dict['objective'] = user_dict.get('objective', 'Muscle growth')
+    user_dict['objective'] = user_dict.get('objective', 'muscle')
     return user_dict
 
 
@@ -399,17 +401,17 @@ async def generate_workout_plan(
     duration = user_data.get('duration', 30)  # Default to 30 minutes
     print(f"Duration: {duration}")
     if duration <= 10:
-        TOTAL_EXERCISES_WANTED = 3
+        TOTAL_EXERCISES_WANTED = 2
     elif duration <= 20:
-        TOTAL_EXERCISES_WANTED = 4
+        TOTAL_EXERCISES_WANTED = 3
     elif duration <= 30:
-        TOTAL_EXERCISES_WANTED = 5
+        TOTAL_EXERCISES_WANTED = 4
     elif duration <= 40:
-        TOTAL_EXERCISES_WANTED = 6
+        TOTAL_EXERCISES_WANTED = 5
     elif duration <= 50:
-        TOTAL_EXERCISES_WANTED = 7
+        TOTAL_EXERCISES_WANTED = 6
     elif duration <= 60:
-        TOTAL_EXERCISES_WANTED = 8
+        TOTAL_EXERCISES_WANTED = 7
     else:
         # For durations > 60, add 1 exercise per additional 10 minutes
         TOTAL_EXERCISES_WANTED = 8 + ((duration - 60) // 10)
@@ -419,6 +421,14 @@ async def generate_workout_plan(
     exercises_per_focus = max(min_exercises_per_focus, 30 // len(p_focus_area_ids))  # Get more candidates
 
     # Step 4: Get exercises ensuring coverage of all focus areas
+    user_objective = user_data.get('objective', 'muscle')  # Default to 'muscle' if not set
+    
+    # Map user objective to exercise type
+    # muscle -> strength (muscle building exercises are typically strength-based)
+    # strength -> strength 
+    # cardio -> cardio
+    exercise_type_filter = 'strength' if user_objective == 'muscle' else user_objective
+    
     all_suitable_exercises = await db_queries.get_recommended_exercises(
         conn=db,
         fitness_level=user_data['fitness_level'],
@@ -426,7 +436,8 @@ async def generate_workout_plan(
         equipment_ids=p_equipment_ids,
         health_issue_ids=p_health_issue_ids,
         exercises_per_focus=exercises_per_focus,
-        total_limit=50  # Get more candidates for better randomness
+        total_limit=50,  # Get more candidates for better randomness
+        objective=exercise_type_filter
     )
     
     # Sort all exercises by ID for consistent ordering
@@ -768,62 +779,21 @@ async def update_user_active_day(
 
     user_id = token_entry['user_id']
 
-    # 2. Perform the update using our new query
+    # 2. Clear custom exercises when changing day without saving
+    await clear_user_custom_exercises(conn, user_id)
+    
+    # 3. Perform the update using our new query
     success = await db_queries.set_active_day_for_user(conn, user_id, day_update.day_number)
 
-    # 3. Handle failure
+    # 4. Handle failure
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to set day {day_update.day_number}. It may not be a valid day number for your currently active routine."
         )
 
-    # 4. Return a success response
+    # 5. Return a success response
     return success_response({}, message=f"Successfully set active workout to Day {day_update.day_number}", status_code=201)
-
-
-@router.get("/user/me/generated-exercises", response_model=UserGeneratedExercisesListResponse)
-async def get_user_generated_exercises(
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
-):
-    """
-    Fetches the user's most recently generated exercises with their calculated KG, REPS, and SETS.
-    This endpoint returns the exercises that were generated and stored after the last /generate call.
-    """
-    # Authenticate the user
-    access_token = await get_access_token_from_header(request)
-    token_entry = await db_queries.fetch_access_token(db, access_token)
-    if not token_entry:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
-
-    user_id = token_entry['user_id']
-
-    # Fetch user's generated exercises
-    exercises_data = await db_queries.get_user_generated_exercises(db, user_id)
-    
-    if not exercises_data:
-        return UserGeneratedExercisesListResponse(exercises=[])
-    
-    # Transform the data to match our response model
-    exercises = []
-    for record in exercises_data:
-        exercises.append(UserGeneratedExerciseResponse(
-            id=record['id'],
-            exercise_id=record['exercise_id'],
-            name=record['name'],
-            description=record.get('description'),
-            video_url=record.get('video_url'),
-            primary_focus_area=record.get('primary_focus_area'),
-            weight_kg=float(record['weight_kg']),
-            reps=record['reps'],
-            sets=record['sets'],
-            one_rm_calculated=float(record['one_rm_calculated']),
-            generated_at=record['generated_at'],
-            updated_at=record['updated_at']
-        ))
-    
-    return UserGeneratedExercisesListResponse(exercises=exercises)
 
 
 @router.patch("/user/me/generated-exercises/{exercise_id}", response_model=UpdateUserGeneratedExerciseResponse)
@@ -1239,6 +1209,10 @@ async def update_routine_day(
                         columns=('user_routine_day_id', 'exercise_id', 'order_in_day')
                     )
                 
+                # Clear custom exercises and generated exercises after saving to routine day
+                await clear_user_custom_exercises(conn, user_id)
+                await clear_user_generated_exercises(conn, user_id)
+                
                 return success_response(
                     data={"exercise_mode": "direct_exercises", "exercises_count": len(exercises)},
                     message="Day updated to direct exercises mode successfully."
@@ -1331,3 +1305,666 @@ async def remove_exercise_from_routine_day(
         )
 
     return None
+
+
+# Custom Exercise Endpoints
+@router.patch("/user/me/custom-exercises")
+async def add_custom_exercise_endpoint(
+    request_data: AddCustomExerciseRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Adds a custom exercise to the user's temporary storage.
+    Calculates weight, reps, sets, and 1RM based on user's matrix settings.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    # Add custom exercise
+    custom_exercise = await add_custom_exercise(conn, user_id, request_data.exercise_id)
+    
+    if not custom_exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Exercise not found or failed to add custom exercise"
+        )
+
+    # Convert to response format
+    exercise_response = CustomExerciseResponse(
+        id=custom_exercise['id'],
+        exercise_id=custom_exercise['exercise_id'],
+        name=custom_exercise['name'],
+        description=custom_exercise['description'],
+        video_url=custom_exercise['video_url'],
+        primary_focus_area=custom_exercise['primary_focus_area'],
+        weight_kg=custom_exercise['weight_kg'],
+        reps=custom_exercise['reps'],
+        sets=custom_exercise['sets'],
+        one_rm_calculated=custom_exercise['one_rm_calculated'],
+        added_at=custom_exercise['added_at']
+    )
+
+    return AddCustomExerciseResponse(
+        message="Custom exercise added successfully",
+        exercise=exercise_response
+    )
+
+
+@router.get("/user/me/generated-exercises")
+async def get_combined_exercises(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Returns generated exercises, custom exercises, and exercises from active routine days for the user.
+    This endpoint combines all types of exercises the user has access to.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    # Get generated exercises
+    generated_exercises_data = await db_queries.get_user_generated_exercises(conn, user_id)
+    generated_exercises = [
+        UserGeneratedExerciseResponse(
+            id=ex['id'],
+            exercise_id=ex['exercise_id'],
+            name=ex['name'],
+            description=ex['description'],
+            video_url=ex['video_url'],
+            primary_focus_area=ex['primary_focus_area'],
+            weight_kg=ex['weight_kg'],
+            reps=ex['reps'],
+            sets=ex['sets'],
+            one_rm_calculated=ex['one_rm_calculated'],
+            generated_at=ex['generated_at'],
+            updated_at=ex['updated_at']
+        )
+        for ex in generated_exercises_data
+    ]
+
+    # Get custom exercises
+    custom_exercises_data = await get_user_custom_exercises(conn, user_id)
+    custom_exercises = [
+        CustomExerciseResponse(
+            id=ex['id'],
+            exercise_id=ex['exercise_id'],
+            name=ex['name'],
+            description=ex['description'],
+            video_url=ex['video_url'],
+            primary_focus_area=ex['primary_focus_area'],
+            weight_kg=ex['weight_kg'],
+            reps=ex['reps'],
+            sets=ex['sets'],
+            one_rm_calculated=ex['one_rm_calculated'],
+            added_at=ex['added_at']
+        )
+        for ex in custom_exercises_data
+    ]
+
+    # Get routine day exercises
+    routine_day_exercises_data = await get_user_routine_day_exercises(conn, user_id)
+    routine_day_exercises = [
+        RoutineDayExerciseResponse(
+            exercise_id=ex['exercise_id'],
+            name=ex['name'],
+            description=ex['description'],
+            video_url=ex['video_url'],
+            primary_focus_area=ex['primary_focus_area'],
+            order_in_day=ex['order_in_day'],
+            day_number=ex['day_number'],
+            routine_name=ex['routine_name']
+        )
+        for ex in routine_day_exercises_data
+    ]
+
+    return CombinedExercisesResponse(
+        generated_exercises=generated_exercises,
+        custom_exercises=custom_exercises,
+        routine_day_exercises=routine_day_exercises,
+        total_count=len(generated_exercises) + len(custom_exercises) + len(routine_day_exercises)
+    )
+
+
+@router.post("/user/me/exercises/alternatives", response_model=AlternativeExercisesResponse)
+async def get_alternative_exercises(
+    request_data: AlternativeExercisesRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Find alternative exercises based on a given exercise ID and user's profile parameters.
+    
+    This endpoint analyzes the user's onboarding profile (fitness level, equipment, health issues)
+    and finds exercises that share similar focus areas with the provided exercise ID.
+    The results are ranked by similarity score based on shared focus areas.
+    """
+    # Authenticate user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    # Get original exercise details
+    original_exercise = await db_queries.get_exercise_details(conn, request_data.exercise_id)
+    if not original_exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise with ID {request_data.exercise_id} not found"
+        )
+    
+    # Get alternative exercises based on user profile
+    alternatives_data = await db_queries.get_alternative_exercises(
+        conn, request_data.exercise_id, user_id, limit=15
+    )
+    
+    # Format original exercise data
+    original_exercise_dict = {
+        'id': original_exercise['id'],
+        'name': original_exercise['name'],
+        'description': original_exercise['description'],
+        'video_url': original_exercise['video_url'],
+        'primary_focus_area': original_exercise['primary_focus_area'],
+        'focus_areas': original_exercise['focus_areas'] or []
+    }
+    
+    # Format alternative exercises
+    alternatives = []
+    for alt in alternatives_data:
+        alternatives.append(AlternativeExerciseResponse(
+            id=alt['id'],
+            name=alt['name'],
+            description=alt['description'],
+            video_url=alt['video_url'],
+            primary_focus_area=alt['primary_focus_area'],
+            shared_focus_areas=list(alt['shared_focus_areas']) if alt['shared_focus_areas'] else [],
+            similarity_score=float(alt['similarity_score'])
+        ))
+    
+    message = f"Found {len(alternatives)} alternative exercises for '{original_exercise['name']}' based on your profile"
+    if len(alternatives) == 0:
+        message = f"No alternative exercises found for '{original_exercise['name']}' that match your profile criteria"
+    
+    return AlternativeExercisesResponse(
+        original_exercise=original_exercise_dict,
+        alternatives=alternatives,
+        total_count=len(alternatives),
+        message=message
+    )
+
+
+# ========= WORKOUT SESSION MANAGEMENT ENDPOINTS =========
+
+@router.post("/user/workout/start")
+async def start_workout(
+    request_data: StartWorkoutRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Start a new workout session with the provided exercises.
+    Only one active workout session is allowed per user.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    async with conn.transaction():
+        # Check if user has an active workout session
+        existing_session = await conn.fetchrow("""
+            SELECT id, started_at 
+            FROM workout_sessions 
+            WHERE user_id = $1 AND status = 'active'
+        """, user_id)
+        
+        if existing_session:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You already have an active workout session started at {existing_session['started_at']}"
+            )
+        
+        # Create new workout session
+        workout_session = await conn.fetchrow("""
+            INSERT INTO workout_sessions (user_id, status)
+            VALUES ($1, 'active')
+            RETURNING id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+        """, user_id)
+        
+        # Add exercises to the workout session
+        exercises = []
+        for idx, exercise_data in enumerate(request_data.exercises):
+            # Verify exercise exists
+            exercise_exists = await conn.fetchrow("""
+                SELECT id, name FROM exercises WHERE id = $1
+            """, exercise_data['exercise_id'])
+            
+            if not exercise_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Exercise with ID {exercise_data['exercise_id']} not found"
+                )
+            
+            # Insert workout session exercise
+            session_exercise = await conn.fetchrow("""
+                INSERT INTO workout_session_exercises 
+                (workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout, is_completed, created_at
+            """, 
+                workout_session['id'],
+                exercise_data['exercise_id'],
+                exercise_data.get('planned_sets', 3),
+                exercise_data.get('planned_reps', 12),
+                exercise_data.get('planned_weight_kg', 0.0),
+                idx + 1
+            )
+            
+            exercises.append(WorkoutSessionExerciseResponse(
+                id=session_exercise['id'],
+                workout_session_id=session_exercise['workout_session_id'],
+                exercise_id=session_exercise['exercise_id'],
+                exercise_name=exercise_exists['name'],
+                planned_sets=session_exercise['planned_sets'],
+                planned_reps=session_exercise['planned_reps'],
+                planned_weight_kg=session_exercise['planned_weight_kg'],
+                order_in_workout=session_exercise['order_in_workout'],
+                is_completed=session_exercise['is_completed'],
+                created_at=session_exercise['created_at']
+            ))
+        
+        session_response = WorkoutSessionResponse(
+            id=workout_session['id'],
+            user_id=workout_session['user_id'],
+            status=WorkoutStatusEnum(workout_session['status']),
+            started_at=workout_session['started_at'],
+            completed_at=workout_session['completed_at'],
+            total_duration_seconds=workout_session['total_duration_seconds'],
+            notes=workout_session['notes']
+        )
+        
+        return StartWorkoutResponse(
+            message=f"Workout session started successfully with {len(exercises)} exercises",
+            workout_session=session_response,
+            exercises=exercises
+        )
+
+
+@router.get("/user/workout/status")
+async def get_workout_status(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Check if user has an active workout session and return its details.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    # Check for active workout session
+    active_session = await conn.fetchrow("""
+        SELECT id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+        FROM workout_sessions 
+        WHERE user_id = $1 AND status = 'active'
+    """, user_id)
+    
+    if not active_session:
+        return WorkoutStatusResponse(
+            has_active_workout=False,
+            active_workout=None,
+            exercises=None
+        )
+    
+    # Get exercises for the active session
+    session_exercises = await conn.fetch("""
+        SELECT wse.id, wse.workout_session_id, wse.exercise_id, e.name as exercise_name,
+               wse.planned_sets, wse.planned_reps, wse.planned_weight_kg, 
+               wse.order_in_workout, wse.is_completed, wse.created_at
+        FROM workout_session_exercises wse
+        JOIN exercises e ON wse.exercise_id = e.id
+        WHERE wse.workout_session_id = $1
+        ORDER BY wse.order_in_workout
+    """, active_session['id'])
+    
+    exercises = [
+        WorkoutSessionExerciseResponse(
+            id=ex['id'],
+            workout_session_id=ex['workout_session_id'],
+            exercise_id=ex['exercise_id'],
+            exercise_name=ex['exercise_name'],
+            planned_sets=ex['planned_sets'],
+            planned_reps=ex['planned_reps'],
+            planned_weight_kg=ex['planned_weight_kg'],
+            order_in_workout=ex['order_in_workout'],
+            is_completed=ex['is_completed'],
+            created_at=ex['created_at']
+        )
+        for ex in session_exercises
+    ]
+    
+    session_response = WorkoutSessionResponse(
+        id=active_session['id'],
+        user_id=active_session['user_id'],
+        status=WorkoutStatusEnum(active_session['status']),
+        started_at=active_session['started_at'],
+        completed_at=active_session['completed_at'],
+        total_duration_seconds=active_session['total_duration_seconds'],
+        notes=active_session['notes']
+    )
+    
+    return WorkoutStatusResponse(
+        has_active_workout=True,
+        active_workout=session_response,
+        exercises=exercises
+    )
+
+
+@router.post("/user/workout/log-set")
+async def log_workout_set(
+    request_data: LogSetRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Log a completed set for a specific exercise in the active workout session.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    async with conn.transaction():
+        # Verify the workout session exercise belongs to the user's active session
+        session_exercise = await conn.fetchrow("""
+            SELECT wse.id, wse.workout_session_id, wse.exercise_id, e.name as exercise_name,
+                   ws.user_id, ws.status
+            FROM workout_session_exercises wse
+            JOIN workout_sessions ws ON wse.workout_session_id = ws.id
+            JOIN exercises e ON wse.exercise_id = e.id
+            WHERE wse.id = $1 AND ws.user_id = $2 AND ws.status = 'active'
+        """, request_data.workout_session_exercise_id, user_id)
+        
+        if not session_exercise:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workout session exercise not found or workout is not active"
+            )
+        
+        # Check if this set number already exists for this exercise
+        existing_log = await conn.fetchrow("""
+            SELECT id FROM workout_logs 
+            WHERE workout_session_exercise_id = $1 AND set_number = $2
+        """, request_data.workout_session_exercise_id, request_data.set_number)
+        
+        if existing_log:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Set {request_data.set_number} has already been logged for this exercise"
+            )
+        
+        # Insert the workout log
+        workout_log = await conn.fetchrow("""
+            INSERT INTO workout_logs 
+            (user_id, workout_session_id, workout_session_exercise_id, exercise_id, 
+             set_number, weight_kg, reps_completed, duration_seconds, rest_time_seconds, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, user_id, workout_session_id, workout_session_exercise_id, exercise_id,
+                      set_number, weight_kg, reps_completed, duration_seconds, rest_time_seconds, notes, logged_at
+        """, 
+            user_id,
+            session_exercise['workout_session_id'],
+            request_data.workout_session_exercise_id,
+            session_exercise['exercise_id'],
+            request_data.set_number,
+            request_data.weight_kg,
+            request_data.reps_completed,
+            request_data.duration_seconds,
+            request_data.rest_time_seconds,
+            request_data.notes
+        )
+        
+        log_response = WorkoutLogResponse(
+            id=workout_log['id'],
+            user_id=workout_log['user_id'],
+            workout_session_id=workout_log['workout_session_id'],
+            workout_session_exercise_id=workout_log['workout_session_exercise_id'],
+            exercise_id=workout_log['exercise_id'],
+            exercise_name=session_exercise['exercise_name'],
+            set_number=workout_log['set_number'],
+            weight_kg=workout_log['weight_kg'],
+            reps_completed=workout_log['reps_completed'],
+            duration_seconds=workout_log['duration_seconds'],
+            rest_time_seconds=workout_log['rest_time_seconds'],
+            notes=workout_log['notes'],
+            logged_at=workout_log['logged_at']
+        )
+        
+        return LogSetResponse(
+            message=f"Set {request_data.set_number} logged successfully for {session_exercise['exercise_name']}",
+            workout_log=log_response
+        )
+
+
+@router.post("/user/workout/complete")
+async def complete_workout(
+    request_data: CompleteWorkoutRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Complete the active workout session and create workout history entry.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    async with conn.transaction():
+        # Get active workout session
+        active_session = await conn.fetchrow("""
+            SELECT id, started_at
+            FROM workout_sessions 
+            WHERE user_id = $1 AND status = 'active'
+        """, user_id)
+        
+        if not active_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active workout session found"
+            )
+        
+        # Calculate workout statistics
+        workout_stats = await conn.fetchrow("""
+            SELECT 
+                COUNT(DISTINCT wse.exercise_id) as total_exercises,
+                COUNT(wl.id) as total_sets,
+                EXTRACT(EPOCH FROM (NOW() - $2))::INTEGER as total_duration_seconds
+            FROM workout_session_exercises wse
+            LEFT JOIN workout_logs wl ON wse.id = wl.workout_session_exercise_id
+            WHERE wse.workout_session_id = $1
+        """, active_session['id'], active_session['started_at'])
+        
+        # Update workout session to completed
+        completed_session = await conn.fetchrow("""
+            UPDATE workout_sessions 
+            SET status = 'completed', 
+                completed_at = NOW(), 
+                total_duration_seconds = $2,
+                notes = $3
+            WHERE id = $1
+            RETURNING id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+        """, active_session['id'], workout_stats['total_duration_seconds'], request_data.notes)
+        
+        # Create workout history entry
+        workout_history = await conn.fetchrow("""
+            INSERT INTO workout_history 
+            (user_id, workout_session_id, workout_date, total_exercises, total_sets, 
+             total_duration_seconds, calories_burned, notes)
+            VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7)
+            RETURNING id, user_id, workout_session_id, workout_date, total_exercises, 
+                      total_sets, total_duration_seconds, calories_burned, notes, created_at
+        """, 
+            user_id,
+            active_session['id'],
+            workout_stats['total_exercises'],
+            workout_stats['total_sets'],
+            workout_stats['total_duration_seconds'],
+            0,  # calories_burned - can be calculated later based on exercises and duration
+            request_data.notes
+        )
+        
+        session_response = WorkoutSessionResponse(
+            id=completed_session['id'],
+            user_id=completed_session['user_id'],
+            status=WorkoutStatusEnum(completed_session['status']),
+            started_at=completed_session['started_at'],
+            completed_at=completed_session['completed_at'],
+            total_duration_seconds=completed_session['total_duration_seconds'],
+            notes=completed_session['notes']
+        )
+        
+        history_response = WorkoutHistoryResponse(
+            id=workout_history['id'],
+            user_id=workout_history['user_id'],
+            workout_session_id=workout_history['workout_session_id'],
+            workout_date=workout_history['workout_date'].strftime('%Y-%m-%d'),
+            total_exercises=workout_history['total_exercises'],
+            total_sets=workout_history['total_sets'],
+            total_duration_seconds=workout_history['total_duration_seconds'],
+            calories_burned=workout_history['calories_burned'],
+            notes=workout_history['notes'],
+            created_at=workout_history['created_at']
+        )
+        
+        return CompleteWorkoutResponse(
+            message=f"Workout completed successfully!",
+            workout_session=session_response,
+            workout_history=history_response
+        )
+
+
+@router.get("/user/workout/history")
+async def get_workout_history(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db),
+    limit: int = 20,
+    offset: int = 0
+):
+    """
+    Get user's workout history grouped by date with aggregated exercise data.
+    """
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+    
+    # Get workout history grouped by date
+    daily_history = await conn.fetch("""
+        SELECT 
+            wh.workout_date,
+            COUNT(DISTINCT wh.workout_session_id) as total_workouts,
+            SUM(wh.total_exercises) as total_exercises,
+            SUM(wh.total_sets) as total_sets,
+            SUM(wh.total_duration_seconds) as total_duration_seconds
+        FROM workout_history wh
+        WHERE wh.user_id = $1
+        GROUP BY wh.workout_date
+        ORDER BY wh.workout_date DESC
+        LIMIT $2 OFFSET $3
+    """, user_id, limit, offset)
+    
+    # Get total count of unique workout dates
+    total_count = await conn.fetchval("""
+        SELECT COUNT(DISTINCT workout_date) FROM workout_history WHERE user_id = $1
+    """, user_id)
+    
+    # For each date, get detailed workout sessions
+    history = []
+    for daily_record in daily_history:
+        workout_date = daily_record['workout_date']
+        
+        # Get all workout sessions for this date
+        sessions_data = await conn.fetch("""
+            SELECT 
+                ws.id as workout_session_id,
+                ws.started_at,
+                ws.completed_at,
+                ws.total_duration_seconds,
+                ws.notes
+            FROM workout_sessions ws
+            JOIN workout_history wh ON ws.id = wh.workout_session_id
+            WHERE wh.user_id = $1 AND wh.workout_date = $2
+            ORDER BY ws.started_at
+        """, user_id, workout_date)
+        
+        workout_sessions = []
+        for session in sessions_data:
+            # Get exercise summary for this session
+            exercises_data = await conn.fetch("""
+                SELECT 
+                    e.id as exercise_id,
+                    e.name as exercise_name,
+                    COUNT(wl.id) as total_sets,
+                    ROUND(AVG(wl.weight_kg), 1) as avg_weight,
+                    ROUND(AVG(wl.reps_completed), 0) as avg_reps
+                FROM workout_session_exercises wse
+                JOIN exercises e ON wse.exercise_id = e.id
+                LEFT JOIN workout_logs wl ON wse.id = wl.workout_session_exercise_id
+                WHERE wse.workout_session_id = $1
+                GROUP BY e.id, e.name
+                ORDER BY MIN(wse.order_in_workout)
+            """, session['workout_session_id'])
+            
+            exercises = []
+            for ex in exercises_data:
+                # Create summary string like "4 sets × 10 reps at 9kg"
+                if ex['total_sets'] > 0:
+                    sets_summary = f"{ex['total_sets']} sets × {int(ex['avg_reps'])} reps at {ex['avg_weight']}kg"
+                else:
+                    sets_summary = "No sets logged"
+                
+                exercises.append(ExerciseSummary(
+                    exercise_id=ex['exercise_id'],
+                    exercise_name=ex['exercise_name'],
+                    total_sets=ex['total_sets'],
+                    sets_summary=sets_summary
+                ))
+            
+            workout_sessions.append(WorkoutSessionSummary(
+                workout_session_id=session['workout_session_id'],
+                started_at=session['started_at'],
+                completed_at=session['completed_at'],
+                total_duration_seconds=session['total_duration_seconds'] or 0,
+                exercises=exercises,
+                notes=session['notes']
+            ))
+        
+        history.append(DailyWorkoutHistory(
+            workout_date=workout_date.strftime('%Y-%m-%d'),
+            total_workouts=daily_record['total_workouts'],
+            total_exercises=daily_record['total_exercises'],
+            total_sets=daily_record['total_sets'],
+            total_duration_seconds=daily_record['total_duration_seconds'],
+            workout_sessions=workout_sessions
+        ))
+    
+    return WorkoutHistoryListResponse(
+        history=history,
+        total_count=total_count
+    )
+
+

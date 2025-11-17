@@ -126,15 +126,16 @@ def generate_full_sql_script():
         user_routine_day_focus_areas, user_routine_day_exercises, user_routine_days, user_routines,
         routine_day_focus_areas, routine_days,
         weight_history, body_measurement_history, user_workout_days,
-        workout_logs, workout_plan_exercises, workout_plans, 
+        workout_history, workout_logs, workout_session_exercises, workout_sessions,
+        workout_plan_exercises, workout_plans, 
         user_goals, user_focus_areas, user_health_issues, user_equipment, 
         exercise_focus_areas, exercise_equipment, exercise_contraindications, exercise_fitness_levels,
         exercises, users, routines, goals, motivations, user_motivations, focus_areas, health_issues, equipment, equipment_types,
-        token_blocklist, user_login_history, user_generated_exercises CASCADE;
+        token_blocklist, user_login_history, user_generated_exercises, user_custom_exercises CASCADE;
 
     DROP TYPE IF EXISTS 
         gender_enum, fitness_level_enum, activity_level_enum, day_of_week_enum, 
-        user_status_enum, unit_preference_enum, exercise_type_enum;
+        user_status_enum, unit_preference_enum, exercise_type_enum, workout_status_enum;
 
     -- Trigger function to automatically update the 'updated_at' timestamp on any table.
     CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -215,7 +216,7 @@ def generate_full_sql_script():
         rapge_ranges BOOLEAN DEFAULT FALSE,
         duration INTEGER DEFAULT 30, -- in minutes
         rest_time INTEGER DEFAULT 30, -- in seconds
-        objective VARCHAR(50) DEFAULT 'Muscle growth',
+        objective VARCHAR(50) DEFAULT 'muscle',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
@@ -361,10 +362,110 @@ def generate_full_sql_script():
     CREATE TABLE body_measurement_history (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, measurement_type VARCHAR(50) NOT NULL, value DECIMAL(6, 2) NOT NULL, logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE workout_plans (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, plan_name VARCHAR(255) NOT NULL, is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE workout_plan_exercises (id BIGSERIAL PRIMARY KEY, workout_plan_id BIGINT NOT NULL REFERENCES workout_plans(id) ON DELETE CASCADE, exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE, day_of_week day_of_week_enum NOT NULL, order_in_workout INTEGER DEFAULT 0, sets_recommended INTEGER, reps_recommended VARCHAR(50), rest_period_seconds INTEGER);
-    CREATE TABLE workout_logs (id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE, workout_plan_exercise_id BIGINT REFERENCES workout_plan_exercises(id) ON DELETE SET NULL, completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, set_number INTEGER, weight_kg DECIMAL(6, 2), reps_completed INTEGER, duration_seconds INTEGER, notes TEXT);
-    CREATE TABLE IF NOT EXISTS token_blocklist (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, access_token TEXT NOT NULL UNIQUE, refresh_token TEXT NOT NULL, exp_time TIMESTAMP WITH TIME ZONE NOT NULL, revoked BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
-    CREATE TRIGGER trigger_set_updated_at_token_blocklist BEFORE UPDATE ON token_blocklist FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-    CREATE TABLE IF NOT EXISTS user_login_history (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, login_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, logout_time TIMESTAMP WITH TIME ZONE, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    -- ========= WORKOUT SESSION MANAGEMENT TABLES =========
+    CREATE TYPE workout_status_enum AS ENUM ('active', 'completed', 'cancelled');
+    
+    -- Workout sessions to track active workouts
+    CREATE TABLE workout_sessions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status workout_status_enum NOT NULL DEFAULT 'active',
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP WITH TIME ZONE,
+        total_duration_seconds INTEGER,
+        notes TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Workout session exercises (exercises included in this session)
+    CREATE TABLE workout_session_exercises (
+        id BIGSERIAL PRIMARY KEY,
+        workout_session_id BIGINT NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        planned_sets INTEGER DEFAULT 3,
+        planned_reps INTEGER DEFAULT 12,
+        planned_weight_kg DECIMAL(6, 2) DEFAULT 0.00,
+        order_in_workout INTEGER DEFAULT 1,
+        is_completed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Enhanced workout logs for individual sets
+    CREATE TABLE workout_logs (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        workout_session_id BIGINT REFERENCES workout_sessions(id) ON DELETE CASCADE,
+        workout_session_exercise_id BIGINT REFERENCES workout_session_exercises(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        set_number INTEGER NOT NULL,
+        weight_kg DECIMAL(6, 2) DEFAULT 0.00,
+        reps_completed INTEGER NOT NULL,
+        duration_seconds INTEGER,
+        rest_time_seconds INTEGER,
+        notes TEXT,
+        logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        workout_plan_exercise_id BIGINT REFERENCES workout_plan_exercises(id) ON DELETE SET NULL
+    );
+    
+    -- Workout history (completed workout summaries)
+    CREATE TABLE workout_history (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        workout_session_id BIGINT NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+        workout_date DATE NOT NULL,
+        total_exercises INTEGER DEFAULT 0,
+        total_sets INTEGER DEFAULT 0,
+        total_duration_seconds INTEGER DEFAULT 0,
+        calories_burned INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Create indexes for better performance
+    CREATE INDEX idx_workout_sessions_user_id ON workout_sessions(user_id);
+    CREATE INDEX idx_workout_sessions_status ON workout_sessions(status);
+    CREATE INDEX idx_workout_session_exercises_session_id ON workout_session_exercises(workout_session_id);
+    CREATE INDEX idx_workout_logs_session_id ON workout_logs(workout_session_id);
+    CREATE INDEX idx_workout_logs_user_id ON workout_logs(user_id);
+    CREATE INDEX idx_workout_history_user_id ON workout_history(user_id);
+    CREATE INDEX idx_workout_history_date ON workout_history(workout_date);
+    
+    -- Add triggers for updated_at timestamps
+    CREATE TRIGGER trigger_workout_sessions_updated_at
+    BEFORE UPDATE ON workout_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+    
+    CREATE TRIGGER trigger_workout_session_exercises_updated_at
+    BEFORE UPDATE ON workout_session_exercises
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+    
+    -- ========= AUTHENTICATION & SECURITY TABLES =========
+    CREATE TABLE IF NOT EXISTS token_blocklist (
+        id SERIAL PRIMARY KEY, 
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, 
+        access_token TEXT NOT NULL UNIQUE, 
+        refresh_token TEXT NOT NULL, 
+        exp_time TIMESTAMP WITH TIME ZONE NOT NULL, 
+        revoked BOOLEAN NOT NULL DEFAULT FALSE, 
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TRIGGER trigger_set_updated_at_token_blocklist 
+    BEFORE UPDATE ON token_blocklist 
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+    
+    CREATE TABLE IF NOT EXISTS user_login_history (
+        id SERIAL PRIMARY KEY, 
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, 
+        login_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+        logout_time TIMESTAMP WITH TIME ZONE, 
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     
     -- ========= USER GENERATED EXERCISES TABLE =========
     CREATE TABLE user_generated_exercises (
@@ -385,6 +486,28 @@ def generate_full_sql_script():
     
     CREATE TRIGGER trigger_user_generated_exercises_updated_at
     BEFORE UPDATE ON user_generated_exercises
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+    
+    -- ========= USER CUSTOM EXERCISES TABLE (TEMPORARY STORAGE) =========
+    CREATE TABLE user_custom_exercises (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        weight_kg DECIMAL(6, 2) NOT NULL DEFAULT 0.00,
+        reps INTEGER NOT NULL DEFAULT 12,
+        sets INTEGER NOT NULL DEFAULT 3,
+        one_rm_calculated DECIMAL(6, 2) NOT NULL DEFAULT 0.00,
+        added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, exercise_id)
+    );
+    
+    CREATE INDEX idx_user_custom_exercises_user_id ON user_custom_exercises(user_id);
+    CREATE INDEX idx_user_custom_exercises_exercise_id ON user_custom_exercises(exercise_id);
+    
+    CREATE TRIGGER trigger_user_custom_exercises_updated_at
+    BEFORE UPDATE ON user_custom_exercises
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
     
