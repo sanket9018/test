@@ -153,7 +153,7 @@ def generate_full_sql_script():
     CREATE TYPE day_of_week_enum AS ENUM ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday');
     CREATE TYPE user_status_enum AS ENUM ('active', 'pending_verification', 'suspended', 'deleted');
     CREATE TYPE unit_preference_enum AS ENUM ('metric', 'imperial');
-    CREATE TYPE exercise_type_enum AS ENUM ('strength', 'cardio', 'flexibility');
+    CREATE TYPE exercise_type_enum AS ENUM ('strength', 'cardio', 'flexibility', 'muscle_growth');
 
     -- ========= LOOKUP TABLES (Unchanged) =========
     CREATE TABLE goals (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL UNIQUE, description TEXT);
@@ -693,7 +693,7 @@ def generate_full_sql_script():
 
         ex_desc = sql_escape(ex.get('desc', ''))
         
-        type_mapping = {"Strength Training": "strength", "Muscle Growth": "strength", "Calorie Burning": "cardio"}
+        type_mapping = {"Strength Training": "strength", "Muscle Growth": "muscle_growth", "Calorie Burning": "cardio"}
         json_types = ex.get('type', [])
         ex_type = 'strength' # Default
         for t in json_types:

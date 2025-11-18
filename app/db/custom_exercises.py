@@ -25,7 +25,7 @@ async def add_custom_exercise(conn: asyncpg.Connection, user_id: int, exercise_i
         
         # Get exercise details
         exercise_query = """
-        SELECT e.id, e.name, e.description, e.video_url, fa.name as primary_focus_area
+        SELECT e.id, e.name, e.description, e.video_url, e.exercise_type, fa.name as primary_focus_area
         FROM exercises e
         LEFT JOIN focus_areas fa ON e.primary_focus_area_id = fa.id
         WHERE e.id = $1
@@ -125,16 +125,35 @@ async def clear_user_custom_exercises(conn: asyncpg.Connection, user_id: int) ->
 
 def calculate_exercise_parameters(user_data: asyncpg.Record, exercise_data: asyncpg.Record) -> tuple:
     """
-    Calculates exercise parameters (weight, reps, sets, 1RM) based on user's matrix settings.
-    This is a simplified version - you can enhance this logic based on your requirements.
+    Calculates exercise parameters (weight, reps, sets, 1RM) based on user's matrix settings and exercise type.
+    Different exercise types get different parameter ranges for optimal training.
     
     Returns:
         Tuple of (weight_kg, reps, sets, one_rm_calculated)
     """
-    # Base values
+    # Base values adjusted by exercise type
     base_weight = float(user_data['current_weight_kg'] or 70.0) * 0.5  # Start with 50% of body weight
-    base_reps = 12
-    base_sets = 3
+    exercise_type = exercise_data.get('exercise_type', 'strength')
+    
+    # Adjust base parameters based on exercise type
+    if exercise_type == 'muscle_growth':
+        base_reps = 10  # Hypertrophy range: 8-12 reps
+        base_sets = 4   # More volume for muscle growth
+        weight_multiplier = 0.7  # Moderate weight
+    elif exercise_type == 'strength':
+        base_reps = 6   # Strength range: 3-6 reps
+        base_sets = 3   # Standard strength sets
+        weight_multiplier = 0.8  # Higher weight
+    elif exercise_type == 'cardio':
+        base_reps = 20  # Higher reps for cardio
+        base_sets = 3   # Standard sets
+        weight_multiplier = 0.4  # Lower weight, focus on endurance
+    else:  # flexibility or other
+        base_reps = 12
+        base_sets = 3
+        weight_multiplier = 0.5
+    
+    base_weight *= weight_multiplier
     
     # Adjust based on fitness level
     fitness_multipliers = {

@@ -72,7 +72,7 @@ class UserOnboardingCreate(BaseModel):
     # This ID specifies which of the 7 default routines should be marked as active.
     routine_id: int
     
-    # Objective can be one of: muscle, strength, cardio
+    # Objective can be one of: muscle (maps to muscle_growth), strength, cardio
     objective: str = Field(...) 
     
     motivation_ids: List[int]

@@ -424,10 +424,10 @@ async def generate_workout_plan(
     user_objective = user_data.get('objective', 'muscle')  # Default to 'muscle' if not set
     
     # Map user objective to exercise type
-    # muscle -> strength (muscle building exercises are typically strength-based)
+    # muscle -> muscle_growth
     # strength -> strength 
     # cardio -> cardio
-    exercise_type_filter = 'strength' if user_objective == 'muscle' else user_objective
+    exercise_type_filter = 'muscle_growth' if user_objective == 'muscle' else user_objective
     
     all_suitable_exercises = await db_queries.get_recommended_exercises(
         conn=db,
