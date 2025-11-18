@@ -189,6 +189,7 @@ class UserUpdate(BaseSchema):
     motivation_ids: Optional[List[int]] = None
 
 class UserProfileUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=255)
     gender: Optional[GenderEnum] = None
     age: Optional[int] = Field(None, gt=0, lt=120)
     height_cm: Optional[float] = None

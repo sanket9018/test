@@ -147,7 +147,7 @@ async def update_user_profile(
 
     # Update main user table fields
     main_fields = [
-        "gender", "age", "height_cm", "current_weight_kg", "target_weight_kg",
+        "name", "gender", "age", "height_cm", "current_weight_kg", "target_weight_kg",
         "fitness_level", "activity_level", "workouts_per_week", "is_matrix", "randomness",
         "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
     ]
