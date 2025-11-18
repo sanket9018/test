@@ -315,6 +315,7 @@ class ExerciseResponse(BaseModel):
     name: str
     description: Optional[str] = None
     video_url: Optional[str] = Field(None, alias="videoUrl")
+    image_url: Optional[str] = Field(None, alias="imageUrl")
     primary_focus_area: str
 
 from pydantic import BaseModel
@@ -417,6 +418,7 @@ class ExerciseItem(BaseModel):
     name: str
     description: Optional[str] = None
     video_url: Optional[str] = None
+    image_url: Optional[str] = None
     focus_areas: List[ExerciseFocusArea] = []
 
 class ExercisesListResponse(BaseModel):

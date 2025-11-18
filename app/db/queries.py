@@ -302,6 +302,7 @@ async def fetch_all_exercises(conn: asyncpg.Connection):
         e.name,
         e.description,
         e.video_url,
+        e.image_url,
         json_agg(
             json_build_object(
                 'id', fa.id,
@@ -311,7 +312,7 @@ async def fetch_all_exercises(conn: asyncpg.Connection):
     FROM exercises e
     LEFT JOIN exercise_focus_areas efa ON e.id = efa.exercise_id
     LEFT JOIN focus_areas fa ON efa.focus_area_id = fa.id
-    GROUP BY e.id, e.name, e.description, e.video_url
+    GROUP BY e.id, e.name, e.description, e.video_url, e.image_url
     ORDER BY e.id;
     """
     return await conn.fetch(query)
@@ -368,6 +369,7 @@ async def get_recommended_exercises(
             e.name,
             e.description,
             e.video_url,
+            e.image_url,
             fa.name as primary_focus_area,
             ROW_NUMBER() OVER(PARTITION BY edfa.focus_area_id) as rn
         FROM exercises e
@@ -390,7 +392,7 @@ async def get_recommended_exercises(
             AND ($7::text IS NULL OR e.exercise_type::text = $7::text)
     )
     -- FINAL SELECTION: This part is rewritten to handle duplicates.
-    SELECT id, name, description, video_url, primary_focus_area
+    SELECT id, name, description, video_url, image_url, primary_focus_area
     FROM (
         -- Inner subquery selects each exercise only ONCE, picking its highest-ranked version.
         SELECT DISTINCT ON (id) *

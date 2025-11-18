@@ -237,6 +237,7 @@ def generate_full_sql_script():
         name VARCHAR(255) NOT NULL UNIQUE,
         description TEXT,
         video_url VARCHAR(255),
+        image_url VARCHAR(255),
         exercise_type exercise_type_enum,
         primary_focus_area_id INTEGER REFERENCES focus_areas(id), 
         is_high_impact BOOLEAN DEFAULT FALSE
@@ -717,7 +718,11 @@ def generate_full_sql_script():
                     # This is where the warning is generated
                     pass
 
-        with_clauses = [f"new_exercise AS (INSERT INTO exercises (name, description, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"]
+        # Get video_url and image_url from JSON if available
+        ex_video_url = sql_escape(ex.get('video_url', ''))
+        ex_image_url = sql_escape(ex.get('image_url', ''))
+        
+        with_clauses = [f"new_exercise AS (INSERT INTO exercises (name, description, video_url, image_url, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', NULLIF('{ex_video_url}', ''), NULLIF('{ex_image_url}', ''), '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"]
         
         if ex.get('difficulty_levels'):
             difficulty_selects = [f"SELECT id, '{level.lower()}'::fitness_level_enum FROM new_exercise" for level in ex['difficulty_levels']]
