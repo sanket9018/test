@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, model_validator
 from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 from datetime import datetime
@@ -487,7 +487,7 @@ class AddCustomExerciseRequest(BaseModel):
                     raise ValueError(f"All exercise IDs must be positive integers, got: {exercise_id}")
         return v
     
-    @root_validator
+    @model_validator(mode='before')
     def validate_either_single_or_multiple(cls, values):
         exercise_id = values.get('exercise_id')
         exercise_ids = values.get('exercise_ids')
