@@ -1315,7 +1315,8 @@ async def add_custom_exercise_endpoint(
     conn: asyncpg.Connection = Depends(get_db)
 ):
     """
-    Adds a custom exercise to the user's temporary storage.
+    Adds custom exercise(s) to the user's temporary storage.
+    Supports both single exercise (exercise_id) and multiple exercises (exercise_ids).
     Calculates weight, reps, sets, and 1RM based on user's matrix settings.
     """
     access_token = await get_access_token_from_header(request)
@@ -1324,34 +1325,89 @@ async def add_custom_exercise_endpoint(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     user_id = token_entry['user_id']
 
-    # Add custom exercise
-    custom_exercise = await add_custom_exercise(conn, user_id, request_data.exercise_id)
-    
-    if not custom_exercise:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Exercise not found or failed to add custom exercise"
+    # Handle single exercise
+    if request_data.exercise_id is not None:
+        custom_exercise = await add_custom_exercise(conn, user_id, request_data.exercise_id)
+        
+        if not custom_exercise:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Exercise not found or failed to add custom exercise"
+            )
+
+        # Convert to response format
+        exercise_response = CustomExerciseResponse(
+            id=custom_exercise['id'],
+            exercise_id=custom_exercise['exercise_id'],
+            name=custom_exercise['name'],
+            description=custom_exercise['description'],
+            video_url=custom_exercise['video_url'],
+            primary_focus_area=custom_exercise['primary_focus_area'],
+            weight_kg=custom_exercise['weight_kg'],
+            reps=custom_exercise['reps'],
+            sets=custom_exercise['sets'],
+            one_rm_calculated=custom_exercise['one_rm_calculated'],
+            added_at=custom_exercise['added_at']
         )
 
-    # Convert to response format
-    exercise_response = CustomExerciseResponse(
-        id=custom_exercise['id'],
-        exercise_id=custom_exercise['exercise_id'],
-        name=custom_exercise['name'],
-        description=custom_exercise['description'],
-        video_url=custom_exercise['video_url'],
-        primary_focus_area=custom_exercise['primary_focus_area'],
-        weight_kg=custom_exercise['weight_kg'],
-        reps=custom_exercise['reps'],
-        sets=custom_exercise['sets'],
-        one_rm_calculated=custom_exercise['one_rm_calculated'],
-        added_at=custom_exercise['added_at']
-    )
+        return AddCustomExerciseResponse(
+            message="Custom exercise added successfully",
+            exercise=exercise_response
+        )
+    
+    # Handle multiple exercises
+    elif request_data.exercise_ids is not None:
+        successful_exercises = []
+        failed_exercise_ids = []
+        
+        # Process each exercise in a loop
+        for exercise_id in request_data.exercise_ids:
+            try:
+                custom_exercise = await add_custom_exercise(conn, user_id, exercise_id)
+                
+                if custom_exercise:
+                    exercise_response = CustomExerciseResponse(
+                        id=custom_exercise['id'],
+                        exercise_id=custom_exercise['exercise_id'],
+                        name=custom_exercise['name'],
+                        description=custom_exercise['description'],
+                        video_url=custom_exercise['video_url'],
+                        primary_focus_area=custom_exercise['primary_focus_area'],
+                        weight_kg=custom_exercise['weight_kg'],
+                        reps=custom_exercise['reps'],
+                        sets=custom_exercise['sets'],
+                        one_rm_calculated=custom_exercise['one_rm_calculated'],
+                        added_at=custom_exercise['added_at']
+                    )
+                    successful_exercises.append(exercise_response)
+                else:
+                    failed_exercise_ids.append(exercise_id)
+            except Exception:
+                failed_exercise_ids.append(exercise_id)
+        
+        # Check if any exercises were added
+        total_added = len(successful_exercises)
+        if total_added == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No exercises could be added. Please check that the exercise IDs are valid."
+            )
+        
+        # Create response message
+        total_requested = len(request_data.exercise_ids)
+        failed_count = len(failed_exercise_ids)
+        
+        if failed_count == 0:
+            message = f"All {total_added} custom exercises added successfully"
+        else:
+            message = f"{total_added} custom exercises added successfully, {failed_count} failed"
 
-    return AddCustomExerciseResponse(
-        message="Custom exercise added successfully",
-        exercise=exercise_response
-    )
+        return AddCustomExerciseResponse(
+            message=message,
+            exercises=successful_exercises,
+            total_added=total_added,
+            failed_exercises=failed_exercise_ids if failed_exercise_ids else None
+        )
 
 
 @router.get("/user/me/generated-exercises")

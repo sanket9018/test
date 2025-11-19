@@ -475,8 +475,30 @@ class UpdateUserGeneratedExerciseResponse(BaseModel):
 
 # Custom Exercise Schemas
 class AddCustomExerciseRequest(BaseModel):
-    """Request model for adding a custom exercise to temporary storage."""
-    exercise_id: int = Field(..., gt=0, description="ID of the exercise to add as custom")
+    """Request model for adding custom exercise(s) to temporary storage."""
+    exercise_id: Optional[int] = Field(None, gt=0, description="ID of the exercise to add as custom (for single exercise)")
+    exercise_ids: Optional[List[int]] = Field(None, min_items=1, description="List of exercise IDs to add as custom (for multiple exercises)")
+    
+    @validator('exercise_ids')
+    def validate_exercise_ids(cls, v):
+        if v is not None:
+            for exercise_id in v:
+                if exercise_id <= 0:
+                    raise ValueError(f"All exercise IDs must be positive integers, got: {exercise_id}")
+        return v
+    
+    @root_validator
+    def validate_either_single_or_multiple(cls, values):
+        exercise_id = values.get('exercise_id')
+        exercise_ids = values.get('exercise_ids')
+        
+        if exercise_id is None and exercise_ids is None:
+            raise ValueError('Either exercise_id or exercise_ids must be provided')
+        
+        if exercise_id is not None and exercise_ids is not None:
+            raise ValueError('Provide either exercise_id or exercise_ids, not both')
+        
+        return values
 
 class CustomExerciseResponse(BaseModel):
     """Response model for custom exercise with calculated values."""
@@ -494,9 +516,12 @@ class CustomExerciseResponse(BaseModel):
     is_custom: bool = True  # Flag to identify custom exercises in combined responses
 
 class AddCustomExerciseResponse(BaseModel):
-    """Response model for successfully added custom exercise."""
+    """Response model for successfully added custom exercise(s)."""
     message: str
-    exercise: CustomExerciseResponse
+    exercise: Optional[CustomExerciseResponse] = None  # For single exercise
+    exercises: Optional[List[CustomExerciseResponse]] = None  # For multiple exercises
+    total_added: Optional[int] = None  # For multiple exercises
+    failed_exercises: Optional[List[int]] = None  # For multiple exercises - IDs that failed
 
 class RoutineDayExerciseResponse(BaseModel):
     """Response model for exercises from routine days."""
