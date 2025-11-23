@@ -110,7 +110,7 @@ async def read_user(
 
     # The json_agg function in PostgreSQL returns a JSON string.
     # We need to parse these strings into Python lists/dicts before Pydantic validation.
-    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas']:
+    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
         
@@ -178,7 +178,7 @@ async def update_user_profile(
     if not row:
         raise HTTPException(status_code=404, detail="User not found after update")
     user_dict: Dict[str, Any] = dict(row)
-    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas']:
+    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
     # Ensure advanced profile fields are properly typed/defaulted
@@ -373,7 +373,31 @@ async def generate_workout_plan(
                 detail="No direct exercises found for today. Please add exercises to this day or switch to focus areas mode."
             )
         
-        # Return the direct exercises (now properly parsed)
+        # Filter out excluded exercises from direct exercises
+        excluded_exercise_ids = await db.fetch("""
+            SELECT exercise_id FROM user_excluded_exercises_forever 
+            WHERE user_id = $1
+            UNION
+            SELECT exercise_id FROM user_excluded_exercises_today 
+            WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+        """, user_id)
+        
+        excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
+        
+        # Filter out excluded exercises from direct exercises
+        if excluded_ids:
+            original_count = len(direct_exercises)
+            direct_exercises = [ex for ex in direct_exercises if ex.get('id') not in excluded_ids]
+            filtered_count = len(direct_exercises)
+            print(f"Filtered out {original_count - filtered_count} excluded exercises from direct exercises. Remaining: {filtered_count}")
+        
+        if not direct_exercises:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All direct exercises for today have been excluded. Please add more exercises to this day, remove some exclusions, or switch to focus areas mode."
+            )
+        
+        # Return the filtered direct exercises
         return direct_exercises
     
     # Handle focus areas mode (existing logic)
@@ -443,10 +467,29 @@ async def generate_workout_plan(
     # Sort all exercises by ID for consistent ordering
     all_suitable_exercises = sorted(all_suitable_exercises, key=lambda r: r['id'])
 
+    # Step 4.5: Filter out excluded exercises
+    # Get user's excluded exercises (both forever and today)
+    excluded_exercise_ids = await db.fetch("""
+        SELECT exercise_id FROM user_excluded_exercises_forever 
+        WHERE user_id = $1
+        UNION
+        SELECT exercise_id FROM user_excluded_exercises_today 
+        WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+    """, user_id)
+    
+    excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
+    
+    # Filter out excluded exercises
+    if excluded_ids:
+        original_count = len(all_suitable_exercises)
+        all_suitable_exercises = [ex for ex in all_suitable_exercises if ex['id'] not in excluded_ids]
+        filtered_count = len(all_suitable_exercises)
+        print(f"Filtered out {original_count - filtered_count} excluded exercises. Remaining: {filtered_count}")
+
     if not all_suitable_exercises:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment."
+            detail="No suitable exercises found for today's workout. Try adjusting your fitness level or available equipment, or remove some exercise exclusions."
         )
 
     # Step 5: Apply randomness logic
@@ -1330,10 +1373,25 @@ async def add_custom_exercise_endpoint(
         custom_exercise = await add_custom_exercise(conn, user_id, request_data.exercise_id)
         
         if not custom_exercise:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Exercise not found or failed to add custom exercise"
-            )
+            # Check if exercise is excluded to provide better error message
+            exclusion_check = await conn.fetchrow("""
+                SELECT 1 FROM user_excluded_exercises_forever 
+                WHERE user_id = $1 AND exercise_id = $2
+                UNION
+                SELECT 1 FROM user_excluded_exercises_today 
+                WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
+            """, user_id, request_data.exercise_id)
+            
+            if exclusion_check:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot add exercise: This exercise is currently excluded. Please remove the exclusion first."
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Exercise not found or failed to add custom exercise"
+                )
 
         # Convert to response format
         exercise_response = CustomExerciseResponse(
@@ -1389,8 +1447,8 @@ async def add_custom_exercise_endpoint(
         total_added = len(successful_exercises)
         if total_added == 0:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No exercises could be added. Please check that the exercise IDs are valid."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No exercises could be added. This may be because the exercises are excluded or don't exist. Please check exercise exclusions and IDs."
             )
         
         # Create response message
@@ -1425,8 +1483,21 @@ async def get_combined_exercises(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     user_id = token_entry['user_id']
 
+    # Get user's excluded exercises (both forever and today)
+    excluded_exercise_ids = await conn.fetch("""
+        SELECT exercise_id FROM user_excluded_exercises_forever 
+        WHERE user_id = $1
+        UNION
+        SELECT exercise_id FROM user_excluded_exercises_today 
+        WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+    """, user_id)
+    
+    excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
+
     # Get generated exercises
     generated_exercises_data = await db_queries.get_user_generated_exercises(conn, user_id)
+    # Filter out excluded exercises from generated exercises
+    filtered_generated_exercises_data = [ex for ex in generated_exercises_data if ex['exercise_id'] not in excluded_ids]
     generated_exercises = [
         UserGeneratedExerciseResponse(
             id=ex['id'],
@@ -1442,11 +1513,13 @@ async def get_combined_exercises(
             generated_at=ex['generated_at'],
             updated_at=ex['updated_at']
         )
-        for ex in generated_exercises_data
+        for ex in filtered_generated_exercises_data
     ]
 
     # Get custom exercises
     custom_exercises_data = await get_user_custom_exercises(conn, user_id)
+    # Filter out excluded exercises from custom exercises
+    filtered_custom_exercises_data = [ex for ex in custom_exercises_data if ex['exercise_id'] not in excluded_ids]
     custom_exercises = [
         CustomExerciseResponse(
             id=ex['id'],
@@ -1461,11 +1534,13 @@ async def get_combined_exercises(
             one_rm_calculated=ex['one_rm_calculated'],
             added_at=ex['added_at']
         )
-        for ex in custom_exercises_data
+        for ex in filtered_custom_exercises_data
     ]
 
     # Get routine day exercises
     routine_day_exercises_data = await get_user_routine_day_exercises(conn, user_id)
+    # Filter out excluded exercises from routine day exercises
+    filtered_routine_day_exercises_data = [ex for ex in routine_day_exercises_data if ex['exercise_id'] not in excluded_ids]
     routine_day_exercises = [
         RoutineDayExerciseResponse(
             exercise_id=ex['exercise_id'],
@@ -1477,7 +1552,7 @@ async def get_combined_exercises(
             day_number=ex['day_number'],
             routine_name=ex['routine_name']
         )
-        for ex in routine_day_exercises_data
+        for ex in filtered_routine_day_exercises_data
     ]
 
     return CombinedExercisesResponse(
@@ -2022,5 +2097,237 @@ async def get_workout_history(
         history=history,
         total_count=total_count
     )
+
+
+# ========= EXERCISE EXCLUSION ENDPOINTS =========
+
+@router.post("/user/exercises/exclude", response_model=ExcludeExerciseResponse)
+async def exclude_exercise(
+    request: Request,
+    exclude_data: ExcludeExerciseRequest,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Exclude an exercise for the user with two options:
+    1. 'forever' - Permanently exclude this exercise for the user
+    2. 'today' - Exclude this exercise only for today's workout generation
+    """
+    # Authenticate user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    
+    user_id = token_entry['user_id']
+    
+    # Verify exercise exists
+    exercise = await conn.fetchrow("""
+        SELECT id, name FROM exercises WHERE id = $1
+    """, exclude_data.exercise_id)
+    
+    if not exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise with ID {exclude_data.exercise_id} not found"
+        )
+    
+    try:
+        if exclude_data.exclusion_type == ExclusionTypeEnum.forever:
+            # Add to permanent exclusions
+            result = await conn.fetchrow("""
+                INSERT INTO user_excluded_exercises_forever 
+                (user_id, exercise_id, reason)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, exercise_id) 
+                DO UPDATE SET 
+                    excluded_at = CURRENT_TIMESTAMP,
+                    reason = EXCLUDED.reason
+                RETURNING id, excluded_at
+            """, user_id, exclude_data.exercise_id, exclude_data.reason)
+            
+            message = f"Exercise '{exercise['name']}' has been permanently excluded from your workouts"
+            
+        else:  # today
+            # Add to today's exclusions
+            result = await conn.fetchrow("""
+                INSERT INTO user_excluded_exercises_today 
+                (user_id, exercise_id, excluded_date, reason)
+                VALUES ($1, $2, CURRENT_DATE, $3)
+                ON CONFLICT (user_id, exercise_id, excluded_date) 
+                DO UPDATE SET 
+                    excluded_at = CURRENT_TIMESTAMP,
+                    reason = EXCLUDED.reason
+                RETURNING id, excluded_at
+            """, user_id, exclude_data.exercise_id, exclude_data.reason)
+            
+            message = f"Exercise '{exercise['name']}' has been excluded from today's workout generation"
+        
+        return ExcludeExerciseResponse(
+            success=True,
+            message=message,
+            exercise_id=exclude_data.exercise_id,
+            exclusion_type=exclude_data.exclusion_type.value,
+            excluded_at=result['excluded_at']
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to exclude exercise: {str(e)}"
+        )
+
+
+@router.get("/user/exercises/excluded", response_model=UserExcludedExercisesResponse)
+async def get_excluded_exercises(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Get all excluded exercises for the user (both forever and today exclusions).
+    """
+    # Authenticate user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    
+    user_id = token_entry['user_id']
+    
+    # Get forever excluded exercises
+    forever_excluded_data = await conn.fetch("""
+        SELECT 
+            uef.id,
+            uef.exercise_id,
+            e.name as exercise_name,
+            uef.excluded_at,
+            uef.reason
+        FROM user_excluded_exercises_forever uef
+        JOIN exercises e ON uef.exercise_id = e.id
+        WHERE uef.user_id = $1
+        ORDER BY uef.excluded_at DESC
+    """, user_id)
+    
+    # Get today excluded exercises
+    today_excluded_data = await conn.fetch("""
+        SELECT 
+            uet.id,
+            uet.exercise_id,
+            e.name as exercise_name,
+            uet.excluded_at,
+            uet.excluded_date,
+            uet.reason
+        FROM user_excluded_exercises_today uet
+        JOIN exercises e ON uet.exercise_id = e.id
+        WHERE uet.user_id = $1 AND uet.excluded_date = CURRENT_DATE
+        ORDER BY uet.excluded_at DESC
+    """, user_id)
+    
+    # Format forever excluded exercises
+    forever_excluded = [
+        ExcludedExerciseItem(
+            id=item['id'],
+            exercise_id=item['exercise_id'],
+            exercise_name=item['exercise_name'],
+            exclusion_type='forever',
+            excluded_at=item['excluded_at'],
+            reason=item['reason']
+        )
+        for item in forever_excluded_data
+    ]
+    
+    # Format today excluded exercises
+    today_excluded = [
+        ExcludedExerciseItem(
+            id=item['id'],
+            exercise_id=item['exercise_id'],
+            exercise_name=item['exercise_name'],
+            exclusion_type='today',
+            excluded_at=item['excluded_at'],
+            excluded_date=item['excluded_date'].strftime('%Y-%m-%d'),
+            reason=item['reason']
+        )
+        for item in today_excluded_data
+    ]
+    
+    return UserExcludedExercisesResponse(
+        forever_excluded=forever_excluded,
+        today_excluded=today_excluded,
+        total_count=len(forever_excluded) + len(today_excluded)
+    )
+
+
+@router.delete("/user/exercises/exclude", response_model=RemoveExclusionResponse)
+async def remove_exercise_exclusion(
+    request: Request,
+    remove_data: RemoveExclusionRequest,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Remove an exercise exclusion for the user.
+    """
+    # Authenticate user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    
+    user_id = token_entry['user_id']
+    
+    # Verify exercise exists
+    exercise = await conn.fetchrow("""
+        SELECT id, name FROM exercises WHERE id = $1
+    """, remove_data.exercise_id)
+    
+    if not exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise with ID {remove_data.exercise_id} not found"
+        )
+    
+    try:
+        if remove_data.exclusion_type == ExclusionTypeEnum.forever:
+            # Remove from permanent exclusions
+            result = await conn.execute("""
+                DELETE FROM user_excluded_exercises_forever 
+                WHERE user_id = $1 AND exercise_id = $2
+            """, user_id, remove_data.exercise_id)
+            
+            if result == "DELETE 0":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No permanent exclusion found for exercise '{exercise['name']}'"
+                )
+            
+            message = f"Permanent exclusion removed for exercise '{exercise['name']}'"
+            
+        else:  # today
+            # Remove from today's exclusions
+            result = await conn.execute("""
+                DELETE FROM user_excluded_exercises_today 
+                WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
+            """, user_id, remove_data.exercise_id)
+            
+            if result == "DELETE 0":
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No today exclusion found for exercise '{exercise['name']}'"
+                )
+            
+            message = f"Today's exclusion removed for exercise '{exercise['name']}'"
+        
+        return RemoveExclusionResponse(
+            success=True,
+            message=message,
+            exercise_id=remove_data.exercise_id,
+            exclusion_type=remove_data.exclusion_type.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove exercise exclusion: {str(e)}"
+        )
 
 

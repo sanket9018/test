@@ -222,6 +222,24 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         JOIN motivations m ON um.motivation_id = m.id
         WHERE um.user_id = $1
         GROUP BY um.user_id
+    ),
+    user_workout_days_agg AS (
+        SELECT
+            uwd.user_id,
+            json_agg(uwd.day ORDER BY 
+                CASE uwd.day
+                    WHEN 'monday' THEN 1
+                    WHEN 'tuesday' THEN 2
+                    WHEN 'wednesday' THEN 3
+                    WHEN 'thursday' THEN 4
+                    WHEN 'friday' THEN 5
+                    WHEN 'saturday' THEN 6
+                    WHEN 'sunday' THEN 7
+                END
+            ) AS workout_days
+        FROM user_workout_days uwd
+        WHERE uwd.user_id = $1
+        GROUP BY uwd.user_id
     )
     -- FINAL SELECT: Join the main table with the pre-aggregated CTEs.
     -- No GROUP BY is needed here because each join is on a 1-to-1 basis.
@@ -243,6 +261,7 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         u.fitness_level,
         u.activity_level,
         u.workouts_per_week,
+        COALESCE(uwda.workout_days, '[]'::json) AS workout_days,
         -- Use COALESCE to gracefully handle users with no goals/equipment etc.
         COALESCE(uga.goals, '[]'::json) AS goals,
         COALESCE(uea.equipment, '[]'::json) AS equipment,
@@ -258,6 +277,7 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
     LEFT JOIN user_equipment_agg uea ON u.id = uea.user_id
     LEFT JOIN user_health_issues_agg uh ON u.id = uh.user_id
     LEFT JOIN user_motivations_agg uma ON u.id = uma.user_id
+    LEFT JOIN user_workout_days_agg uwda ON u.id = uwda.user_id
     WHERE u.id = $1; -- Filter for the specific user
     """
     return await conn.fetchrow(query, user_id)

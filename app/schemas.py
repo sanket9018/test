@@ -150,6 +150,7 @@ class UserDetailResponse(BaseModel):
     fitness_level: str
     activity_level: str
     workouts_per_week: int
+    workout_days: List[DayOfWeekEnum]
     
     # Simple linked data
     motivations: List[str]
@@ -710,3 +711,50 @@ class WorkoutHistoryListResponse(BaseModel):
     """Response model for workout history list grouped by date."""
     history: List[DailyWorkoutHistory]
     total_count: int
+
+# Exercise Exclusion Schemas
+class ExclusionTypeEnum(str, Enum):
+    forever = "forever"
+    today = "today"
+
+class ExcludeExerciseRequest(BaseModel):
+    """Request model for excluding exercises."""
+    exercise_id: int = Field(..., gt=0, description="ID of the exercise to exclude")
+    exclusion_type: ExclusionTypeEnum = Field(..., description="Type of exclusion: 'forever' or 'today'")
+    reason: Optional[str] = Field(None, max_length=500, description="Optional reason for exclusion")
+
+class ExcludeExerciseResponse(BaseModel):
+    """Response model for exercise exclusion."""
+    success: bool
+    message: str
+    exercise_id: int
+    exclusion_type: str
+    excluded_at: datetime
+
+class ExcludedExerciseItem(BaseModel):
+    """Model for excluded exercise item."""
+    id: int
+    exercise_id: int
+    exercise_name: str
+    exclusion_type: str  # 'forever' or 'today'
+    excluded_at: datetime
+    excluded_date: Optional[str] = None  # Only for 'today' exclusions (YYYY-MM-DD format)
+    reason: Optional[str] = None
+
+class UserExcludedExercisesResponse(BaseModel):
+    """Response model for user's excluded exercises."""
+    forever_excluded: List[ExcludedExerciseItem]
+    today_excluded: List[ExcludedExerciseItem]
+    total_count: int
+
+class RemoveExclusionRequest(BaseModel):
+    """Request model for removing exercise exclusions."""
+    exercise_id: int = Field(..., gt=0, description="ID of the exercise to remove exclusion for")
+    exclusion_type: ExclusionTypeEnum = Field(..., description="Type of exclusion to remove: 'forever' or 'today'")
+
+class RemoveExclusionResponse(BaseModel):
+    """Response model for removing exercise exclusion."""
+    success: bool
+    message: str
+    exercise_id: int
+    exclusion_type: str

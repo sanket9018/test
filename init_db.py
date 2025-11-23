@@ -512,6 +512,44 @@ def generate_full_sql_script():
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
     
+    -- ========= EXERCISE EXCLUSION TABLES =========
+    -- Table for permanently excluded exercises (exclude forever)
+    CREATE TABLE user_excluded_exercises_forever (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        excluded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        reason TEXT,
+        UNIQUE(user_id, exercise_id)
+    );
+    
+    -- Table for temporarily excluded exercises (just for today)
+    CREATE TABLE user_excluded_exercises_today (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+        excluded_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        excluded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        reason TEXT,
+        UNIQUE(user_id, exercise_id, excluded_date)
+    );
+    
+    -- Create indexes for better performance
+    CREATE INDEX idx_user_excluded_exercises_forever_user_id ON user_excluded_exercises_forever(user_id);
+    CREATE INDEX idx_user_excluded_exercises_forever_exercise_id ON user_excluded_exercises_forever(exercise_id);
+    CREATE INDEX idx_user_excluded_exercises_today_user_id ON user_excluded_exercises_today(user_id);
+    CREATE INDEX idx_user_excluded_exercises_today_exercise_id ON user_excluded_exercises_today(exercise_id);
+    CREATE INDEX idx_user_excluded_exercises_today_date ON user_excluded_exercises_today(excluded_date);
+    
+    -- Function to automatically clean up old "today" exclusions (older than 7 days)
+    CREATE OR REPLACE FUNCTION cleanup_old_today_exclusions()
+    RETURNS void AS $$
+    BEGIN
+        DELETE FROM user_excluded_exercises_today 
+        WHERE excluded_date < CURRENT_DATE - INTERVAL '7 days';
+    END;
+    $$ LANGUAGE plpgsql;
+    
     -- ========= INSERT INITIAL LOOKUP AND TEMPLATE DATA =========
     -- Basic Lookups
     INSERT INTO goals (name) VALUES ('Improve Fitness'), ('Build Muscle'), ('Burn Fat'), ('Increase Endurance'), ('Boost Mental Strength'), ('Improve Balance');
