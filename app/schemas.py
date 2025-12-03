@@ -722,17 +722,38 @@ class ExclusionTypeEnum(str, Enum):
 
 class ExcludeExerciseRequest(BaseModel):
     """Request model for excluding exercises."""
-    exercise_id: int = Field(..., gt=0, description="ID of the exercise to exclude")
+    exercise_id: Optional[int] = Field(None, gt=0, description="ID of a single exercise to exclude")
+    exercise_ids: Optional[List[int]] = Field(None, min_items=1, description="List of exercise IDs to exclude")
     exclusion_type: ExclusionTypeEnum = Field(..., description="Type of exclusion: 'forever' or 'today'")
     reason: Optional[str] = Field(None, max_length=500, description="Optional reason for exclusion")
+
+    @validator('exercise_ids')
+    def validate_exercise_ids(cls, v):
+        if v is not None:
+            for exercise_id in v:
+                if exercise_id <= 0:
+                    raise ValueError(f"All exercise IDs must be positive integers, got: {exercise_id}")
+        return v
+
+    @model_validator(mode='before')
+    def validate_either_single_or_multiple(cls, values):
+        single = values.get('exercise_id')
+        multiple = values.get('exercise_ids')
+        if single is None and (multiple is None or len(multiple) == 0):
+            raise ValueError('Either exercise_id or exercise_ids must be provided')
+        if single is not None and multiple is not None:
+            raise ValueError('Provide either exercise_id or exercise_ids, not both')
+        return values
 
 class ExcludeExerciseResponse(BaseModel):
     """Response model for exercise exclusion."""
     success: bool
     message: str
-    exercise_id: int
     exclusion_type: str
-    excluded_at: datetime
+    exercise_id: Optional[int] = None
+    exercise_ids: Optional[List[int]] = None
+    total_excluded: Optional[int] = None
+    excluded_at: Optional[datetime] = None
 
 class ExcludedExerciseItem(BaseModel):
     """Model for excluded exercise item."""

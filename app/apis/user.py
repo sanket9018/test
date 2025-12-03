@@ -2163,55 +2163,92 @@ async def exclude_exercise(
     
     user_id = token_entry['user_id']
     
-    # Verify exercise exists
-    exercise = await conn.fetchrow("""
-        SELECT id, name FROM exercises WHERE id = $1
-    """, exclude_data.exercise_id)
+    # Build the list of exercise IDs to exclude (supports single or multiple)
+    ids: List[int] = []
+    if exclude_data.exercise_id is not None:
+        ids = [exclude_data.exercise_id]
+    elif exclude_data.exercise_ids is not None:
+        # Deduplicate and sanitize
+        ids = list({int(x) for x in exclude_data.exercise_ids if x is not None})
     
-    if not exercise:
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No exercise IDs provided")
+    
+    # Verify all exercises exist
+    rows = await conn.fetch(
+        """
+        SELECT id, name FROM exercises WHERE id = ANY($1::int[])
+        """,
+        ids
+    )
+    found_ids = {r['id'] for r in rows}
+    missing = [eid for eid in ids if eid not in found_ids]
+    if missing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Exercise with ID {exclude_data.exercise_id} not found"
+            detail=f"Exercises not found with IDs: {missing}"
         )
+    # Map id->name for messaging
+    id_to_name = {r['id']: r['name'] for r in rows}
     
     try:
-        if exclude_data.exclusion_type == ExclusionTypeEnum.forever:
-            # Add to permanent exclusions
-            result = await conn.fetchrow("""
-                INSERT INTO user_excluded_exercises_forever 
-                (user_id, exercise_id, reason)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (user_id, exercise_id) 
-                DO UPDATE SET 
-                    excluded_at = CURRENT_TIMESTAMP,
-                    reason = EXCLUDED.reason
-                RETURNING id, excluded_at
-            """, user_id, exclude_data.exercise_id, exclude_data.reason)
-            
-            message = f"Exercise '{exercise['name']}' has been permanently excluded from your workouts"
-            
-        else:  # today
-            # Add to today's exclusions
-            result = await conn.fetchrow("""
-                INSERT INTO user_excluded_exercises_today 
-                (user_id, exercise_id, excluded_date, reason)
-                VALUES ($1, $2, CURRENT_DATE, $3)
-                ON CONFLICT (user_id, exercise_id, excluded_date) 
-                DO UPDATE SET 
-                    excluded_at = CURRENT_TIMESTAMP,
-                    reason = EXCLUDED.reason
-                RETURNING id, excluded_at
-            """, user_id, exclude_data.exercise_id, exclude_data.reason)
-            
-            message = f"Exercise '{exercise['name']}' has been excluded from today's workout generation"
-        
-        return ExcludeExerciseResponse(
-            success=True,
-            message=message,
-            exercise_id=exclude_data.exercise_id,
-            exclusion_type=exclude_data.exclusion_type.value,
-            excluded_at=result['excluded_at']
-        )
+        # Perform upserts within a transaction for atomicity
+        async with conn.transaction():
+            if exclude_data.exclusion_type == ExclusionTypeEnum.forever:
+                for ex_id in ids:
+                    await conn.fetchrow(
+                        """
+                        INSERT INTO user_excluded_exercises_forever 
+                        (user_id, exercise_id, reason)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (user_id, exercise_id) 
+                        DO UPDATE SET 
+                            excluded_at = CURRENT_TIMESTAMP,
+                            reason = EXCLUDED.reason
+                        RETURNING id
+                        """,
+                        user_id, ex_id, exclude_data.reason
+                    )
+                if len(ids) == 1:
+                    message = f"Exercise '{id_to_name[ids[0]]}' has been permanently excluded from your workouts"
+                else:
+                    message = f"{len(ids)} exercises have been permanently excluded from your workouts"
+            else:  # today
+                for ex_id in ids:
+                    await conn.fetchrow(
+                        """
+                        INSERT INTO user_excluded_exercises_today 
+                        (user_id, exercise_id, excluded_date, reason)
+                        VALUES ($1, $2, CURRENT_DATE, $3)
+                        ON CONFLICT (user_id, exercise_id, excluded_date) 
+                        DO UPDATE SET 
+                            excluded_at = CURRENT_TIMESTAMP,
+                            reason = EXCLUDED.reason
+                        RETURNING id
+                        """,
+                        user_id, ex_id, exclude_data.reason
+                    )
+                if len(ids) == 1:
+                    message = f"Exercise '{id_to_name[ids[0]]}' has been excluded from today's workout generation"
+                else:
+                    message = f"{len(ids)} exercises have been excluded from today's workout generation"
+
+        # Build response (single vs multiple)
+        if len(ids) == 1:
+            return ExcludeExerciseResponse(
+                success=True,
+                message=message,
+                exclusion_type=exclude_data.exclusion_type.value,
+                exercise_id=ids[0]
+            )
+        else:
+            return ExcludeExerciseResponse(
+                success=True,
+                message=message,
+                exclusion_type=exclude_data.exclusion_type.value,
+                exercise_ids=ids,
+                total_excluded=len(ids)
+            )
         
     except Exception as e:
         raise HTTPException(
