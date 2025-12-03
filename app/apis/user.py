@@ -671,6 +671,7 @@ async def get_all_equipment(
 
 @router.get("/exercises", response_model=ExercisesListResponse)
 async def get_all_exercises(
+    request: Request,
     db: asyncpg.Connection = Depends(get_db)
 ):
     """
@@ -678,12 +679,37 @@ async def get_all_exercises(
     Returns a list of all available exercises with their details.
     """
     try:
+        # Try to identify user to apply exclusions (auth optional for this endpoint)
+        excluded_ids: set[int] = set()
+        try:
+            access_token = await get_access_token_from_header(request)
+            if access_token:
+                token_entry = await db_queries.fetch_access_token(db, access_token)
+                if token_entry:
+                    user_id = token_entry['user_id']
+                    rows = await db.fetch(
+                        """
+                        SELECT exercise_id FROM user_excluded_exercises_forever 
+                        WHERE user_id = $1
+                        UNION
+                        SELECT exercise_id FROM user_excluded_exercises_today 
+                        WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+                        """,
+                        user_id
+                    )
+                    excluded_ids = {r['exercise_id'] for r in rows}
+        except Exception:
+            # Silently ignore auth errors here to keep endpoint usable without token
+            excluded_ids = set()
+
         # Fetch all exercises from database
         exercises_data = await db_queries.fetch_all_exercises(db)
         
         # Transform the data to match our response model
         exercises = []
         for record in exercises_data:
+            if excluded_ids and record['id'] in excluded_ids:
+                continue
             # Parse focus areas
             focus_areas = []
             if record['focus_areas']:
