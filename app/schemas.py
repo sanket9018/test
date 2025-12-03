@@ -681,6 +681,9 @@ class WorkoutStatusResponse(BaseModel):
     has_active_workout: bool
     active_workout: Optional[WorkoutSessionResponse] = None
     exercises: Optional[List[WorkoutSessionExerciseResponse]] = None
+    workout_logs: Optional[List[WorkoutLogResponse]] = None
+    total_sets_logged: Optional[int] = None
+    total_duration_seconds_so_far: Optional[int] = None
 
 class ExerciseSummary(BaseModel):
     """Summary of an exercise in workout history."""

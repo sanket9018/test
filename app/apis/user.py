@@ -1729,7 +1729,7 @@ async def start_workout(
         )
 
 
-@router.get("/user/workout/status")
+@router.get("/user/workout/status", response_model=WorkoutStatusResponse)
 async def get_workout_status(
     request: Request,
     conn: asyncpg.Connection = Depends(get_db)
@@ -1784,6 +1784,36 @@ async def get_workout_status(
         for ex in session_exercises
     ]
     
+    # Fetch logs for the current active session (only logs from this user's active session)
+    logs_rows = await conn.fetch("""
+        SELECT wl.id, wl.user_id, wl.workout_session_id, wl.workout_session_exercise_id, wl.exercise_id,
+               wl.set_number, wl.weight_kg, wl.reps_completed, wl.duration_seconds, wl.rest_time_seconds,
+               wl.notes, wl.logged_at, e.name AS exercise_name
+        FROM workout_logs wl
+        JOIN exercises e ON wl.exercise_id = e.id
+        WHERE wl.workout_session_id = $1 AND wl.user_id = $2
+        ORDER BY wl.logged_at, wl.set_number
+    """, active_session['id'], user_id)
+    
+    workout_logs = [
+        WorkoutLogResponse(
+            id=wl['id'],
+            user_id=wl['user_id'],
+            workout_session_id=wl['workout_session_id'],
+            workout_session_exercise_id=wl['workout_session_exercise_id'],
+            exercise_id=wl['exercise_id'],
+            exercise_name=wl['exercise_name'],
+            set_number=wl['set_number'],
+            weight_kg=wl['weight_kg'],
+            reps_completed=wl['reps_completed'],
+            duration_seconds=wl['duration_seconds'],
+            rest_time_seconds=wl['rest_time_seconds'],
+            notes=wl['notes'],
+            logged_at=wl['logged_at']
+        )
+        for wl in logs_rows
+    ]
+    
     session_response = WorkoutSessionResponse(
         id=active_session['id'],
         user_id=active_session['user_id'],
@@ -1793,11 +1823,24 @@ async def get_workout_status(
         total_duration_seconds=active_session['total_duration_seconds'],
         notes=active_session['notes']
     )
+    # Calculate elapsed time so far for the active workout if not completed
+    try:
+        if active_session['completed_at']:
+            elapsed_seconds = active_session['total_duration_seconds']
+        else:
+            # Use timezone-aware now matching started_at tzinfo
+            now_tz = datetime.now(active_session['started_at'].tzinfo) if active_session['started_at'] else datetime.now()
+            elapsed_seconds = int((now_tz - active_session['started_at']).total_seconds())
+    except Exception:
+        elapsed_seconds = None
     
     return WorkoutStatusResponse(
         has_active_workout=True,
         active_workout=session_response,
-        exercises=exercises
+        exercises=exercises,
+        workout_logs=workout_logs,
+        total_sets_logged=len(workout_logs),
+        total_duration_seconds_so_far=elapsed_seconds
     )
 
 
