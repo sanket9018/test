@@ -7,7 +7,7 @@ from app.database import get_db
 from app.utils import hash_password, verify_password, success_response, error_response
 from app.db import queries as db_queries
 from app.db.queries import clear_user_generated_exercises, get_user_routine_day_exercises
-from app.db.custom_exercises import add_custom_exercise, get_user_custom_exercises, clear_user_custom_exercises
+from app.db.custom_exercises import add_custom_exercise, get_user_custom_exercises, clear_user_custom_exercises, update_user_custom_exercise
 from app.security import create_access_token, create_refresh_token, SECRET_KEY, ALGORITHM, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 import jwt
 from app.helpers.token import get_access_token_from_header
@@ -893,7 +893,7 @@ async def update_user_generated_exercise(
             detail="At least one field (weight_kg, reps, or sets) must be provided for update"
         )
 
-    # Update the exercise
+    # Update generated exercise first
     updated_record = await db_queries.update_user_generated_exercise(
         db,
         user_id=user_id,
@@ -903,13 +903,36 @@ async def update_user_generated_exercise(
         sets=update_fields.get('sets')
     )
 
+    # If not found in generated, try updating custom exercise
     if not updated_record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Generated exercise with ID {exercise_id} not found for this user"
+        custom_updated = await update_user_custom_exercise(
+            db,
+            user_id=user_id,
+            exercise_id=exercise_id,
+            weight_kg=update_fields.get('weight_kg'),
+            reps=update_fields.get('reps'),
+            sets=update_fields.get('sets')
         )
 
-    # Return the updated exercise data
+        if custom_updated:
+            return UpdateUserGeneratedExerciseResponse(
+                id=custom_updated['id'],
+                exercise_id=custom_updated['exercise_id'],
+                name=custom_updated['name'],
+                weight_kg=float(custom_updated['weight_kg']),
+                reps=custom_updated['reps'],
+                sets=custom_updated['sets'],
+                updated_at=custom_updated['updated_at'],
+                message="Custom exercise updated successfully"
+            )
+
+        # If neither generated nor custom found, return 404
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise with ID {exercise_id} not found for this user"
+        )
+
+    # Return the updated generated exercise data
     return UpdateUserGeneratedExerciseResponse(
         id=updated_record['id'],
         exercise_id=updated_record['exercise_id'],

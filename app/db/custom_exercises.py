@@ -124,6 +124,94 @@ async def get_user_custom_exercises(conn: asyncpg.Connection, user_id: int) -> L
         for row in rows
     ]
 
+async def update_user_custom_exercise(
+    conn: asyncpg.Connection,
+    user_id: int,
+    exercise_id: int,
+    weight_kg: Optional[float] = None,
+    reps: Optional[int] = None,
+    sets: Optional[int] = None
+) -> Optional[asyncpg.Record]:
+    """
+    Updates user's custom exercise with new weight, reps, or sets values and recalculates 1RM.
+    Only updates the fields that are provided (not None).
+    Returns the updated record joined with exercise name or None if not found.
+    """
+    # Ensure there is something to update
+    if weight_kg is None and reps is None and sets is None:
+        return None
+
+    # Fetch current values to compute 1RM
+    current = await conn.fetchrow(
+        """
+        SELECT id, weight_kg, reps
+        FROM user_custom_exercises
+        WHERE user_id = $1 AND exercise_id = $2
+        """,
+        user_id,
+        exercise_id,
+    )
+
+    if not current:
+        return None
+
+    final_weight = float(weight_kg if weight_kg is not None else current['weight_kg'])
+    final_reps = int(reps if reps is not None else current['reps'])
+    new_one_rm = round(final_weight * (1 + final_reps / 30.0), 2)
+
+    # Build dynamic SET clause
+    set_clauses = []
+    params = [user_id, exercise_id]
+    param_index = 3
+
+    if weight_kg is not None:
+        set_clauses.append(f"weight_kg = ${param_index}")
+        params.append(weight_kg)
+        param_index += 1
+
+    if reps is not None:
+        set_clauses.append(f"reps = ${param_index}")
+        params.append(reps)
+        param_index += 1
+
+    if sets is not None:
+        set_clauses.append(f"sets = ${param_index}")
+        params.append(sets)
+        param_index += 1
+
+    # Always update 1RM and timestamp
+    set_clauses.append(f"one_rm_calculated = ${param_index}")
+    params.append(new_one_rm)
+    param_index += 1
+    set_clauses.append("updated_at = NOW()")
+
+    update_query = f"""
+    UPDATE user_custom_exercises
+    SET {', '.join(set_clauses)}
+    WHERE user_id = $1 AND exercise_id = $2
+    RETURNING id, exercise_id, weight_kg, reps, sets, updated_at;
+    """
+
+    updated = await conn.fetchrow(update_query, *params)
+    if not updated:
+        return None
+
+    complete_query = """
+    SELECT 
+        uce.id,
+        uce.exercise_id,
+        e.name,
+        uce.weight_kg,
+        uce.reps,
+        uce.sets,
+        uce.updated_at
+    FROM user_custom_exercises uce
+    JOIN exercises e ON uce.exercise_id = e.id
+    WHERE uce.user_id = $1 AND uce.exercise_id = $2;
+    """
+
+    return await conn.fetchrow(complete_query, user_id, exercise_id)
+
 async def clear_user_custom_exercises(conn: asyncpg.Connection, user_id: int) -> bool:
     """
     Clears all custom exercises for a user from temporary storage.
