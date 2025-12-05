@@ -7,7 +7,7 @@ from app.database import get_db
 from app.utils import hash_password, verify_password, success_response, error_response
 from app.db import queries as db_queries
 from app.db.queries import clear_user_generated_exercises, get_user_routine_day_exercises
-from app.db.custom_exercises import add_custom_exercise, get_user_custom_exercises, clear_user_custom_exercises, update_user_custom_exercise
+from app.db.custom_exercises import add_custom_exercise, get_user_custom_exercises, clear_user_custom_exercises, update_user_custom_exercise, calculate_exercise_parameters
 from app.security import create_access_token, create_refresh_token, SECRET_KEY, ALGORITHM, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 import jwt
 from app.helpers.token import get_access_token_from_header
@@ -1775,6 +1775,175 @@ async def start_workout(
             message=f"Workout session started successfully with {len(exercises)} exercises",
             workout_session=session_response,
             exercises=exercises
+        )
+
+
+@router.post("/user/workout/add-exercises")
+async def add_exercises_to_active_workout(
+    request_data: StartWorkoutRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    async with conn.transaction():
+        # Ensure there is an active session
+        active_session = await conn.fetchrow(
+            """
+            SELECT id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+            FROM workout_sessions
+            WHERE user_id = $1 AND status = 'active'
+            """,
+            user_id,
+        )
+
+        if not active_session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active workout session found")
+
+        # Get current max order to append after existing items
+        current_max_order = await conn.fetchval(
+            "SELECT COALESCE(MAX(order_in_workout), 0) FROM workout_session_exercises WHERE workout_session_id = $1",
+            active_session['id'],
+        )
+
+        # Fetch minimal user data needed for defaults calculation
+        user_profile = await conn.fetchrow(
+            """
+            SELECT is_matrix, randomness, duration, rest_time, objective, fitness_level, current_weight_kg
+            FROM users WHERE id = $1
+            """,
+            user_id,
+        )
+
+        added_exercises: List[WorkoutSessionExerciseResponse] = []
+        skipped_duplicates: int = 0
+        skipped_excluded: int = 0
+
+        for idx, ex_payload in enumerate(request_data.exercises):
+            ex_id = ex_payload.get('exercise_id')
+            if not ex_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="exercise_id is required for each item")
+
+            # Verify exercise exists and get type/name
+            exercise_row = await conn.fetchrow(
+                "SELECT id, name, exercise_type FROM exercises WHERE id = $1",
+                ex_id,
+            )
+            if not exercise_row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Exercise with ID {ex_id} not found")
+
+            # Respect user's exclusions (forever + today)
+            exclusion_check = await conn.fetchrow(
+                """
+                SELECT 1 FROM user_excluded_exercises_forever WHERE user_id = $1 AND exercise_id = $2
+                UNION
+                SELECT 1 FROM user_excluded_exercises_today WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
+                """,
+                user_id,
+                ex_id,
+            )
+            if exclusion_check:
+                skipped_excluded += 1
+                continue
+
+            # Skip duplicates in the same session
+            already_present = await conn.fetchval(
+                """
+                SELECT 1 FROM workout_session_exercises 
+                WHERE workout_session_id = $1 AND exercise_id = $2
+                """,
+                active_session['id'],
+                ex_id,
+            )
+            if already_present:
+                skipped_duplicates += 1
+                continue
+
+            # Compute defaults when not explicitly provided
+            # Prefer user's custom exercise values if available; otherwise compute from profile
+            custom_defaults = await conn.fetchrow(
+                "SELECT weight_kg, reps, sets FROM user_custom_exercises WHERE user_id = $1 AND exercise_id = $2",
+                user_id,
+                ex_id,
+            )
+            if custom_defaults:
+                default_weight = float(custom_defaults['weight_kg'])
+                default_reps = int(custom_defaults['reps'])
+                default_sets = int(custom_defaults['sets'])
+            else:
+                default_weight, default_reps, default_sets, _ = calculate_exercise_parameters(user_profile, exercise_row)
+
+            if 'planned_sets' in ex_payload and ex_payload.get('planned_sets') is not None:
+                planned_sets = int(ex_payload['planned_sets'])
+            else:
+                planned_sets = int(default_sets)
+
+            if 'planned_reps' in ex_payload and ex_payload.get('planned_reps') is not None:
+                planned_reps = int(ex_payload['planned_reps'])
+            else:
+                planned_reps = int(default_reps)
+
+            if 'planned_weight_kg' in ex_payload and ex_payload.get('planned_weight_kg') is not None:
+                planned_weight = float(ex_payload['planned_weight_kg'])
+            else:
+                planned_weight = float(default_weight)
+
+            # Insert new session exercise
+            session_exercise = await conn.fetchrow(
+                """
+                INSERT INTO workout_session_exercises
+                (workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout, is_completed, created_at
+                """,
+                active_session['id'],
+                ex_id,
+                planned_sets,
+                planned_reps,
+                planned_weight,
+                int(current_max_order) + idx + 1,
+            )
+
+            added_exercises.append(
+                WorkoutSessionExerciseResponse(
+                    id=session_exercise['id'],
+                    workout_session_id=session_exercise['workout_session_id'],
+                    exercise_id=session_exercise['exercise_id'],
+                    exercise_name=exercise_row['name'],
+                    planned_sets=session_exercise['planned_sets'],
+                    planned_reps=session_exercise['planned_reps'],
+                    planned_weight_kg=session_exercise['planned_weight_kg'],
+                    order_in_workout=session_exercise['order_in_workout'],
+                    is_completed=session_exercise['is_completed'],
+                    created_at=session_exercise['created_at'],
+                )
+            )
+
+        session_response = WorkoutSessionResponse(
+            id=active_session['id'],
+            user_id=active_session['user_id'],
+            status=WorkoutStatusEnum(active_session['status']),
+            started_at=active_session['started_at'],
+            completed_at=active_session['completed_at'],
+            total_duration_seconds=active_session['total_duration_seconds'],
+            notes=active_session['notes'],
+        )
+
+        details = []
+        details.append(f"added {len(added_exercises)}")
+        if skipped_duplicates:
+            details.append(f"skipped {skipped_duplicates} duplicate(s)")
+        if skipped_excluded:
+            details.append(f"skipped {skipped_excluded} excluded")
+
+        return StartWorkoutResponse(
+            message="Added exercises to active workout: " + ", ".join(details),
+            workout_session=session_response,
+            exercises=added_exercises,
         )
 
 
