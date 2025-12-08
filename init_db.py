@@ -107,16 +107,11 @@ def execute_sql_file(file_path, db_name):
             cursor.close()
             conn.close()
 
-def generate_full_sql_script():
+def generate_schema_sql():
     """
-    Generates the complete SQL script including schema and detailed exercise data.
-    This approach keeps data management in Python, which is easier to read and maintain.
+    Generate only the schema and seed lookup/template data.
+    Dynamic exercise inserts are handled in a second phase after the schema is applied.
     """
-    
-    import json
-    # (The entire 'schema_sql' string remains exactly the same as in your last version)
-    # ...
-    # I am omitting the long schema_sql string for brevity, but you should keep it as is.
     schema_sql = """
     -- Drop existing objects in reverse order of dependency to ensure a clean slate.
     DROP TRIGGER IF EXISTS trigger_assign_routines_on_user_insert ON users;
@@ -700,16 +695,15 @@ def generate_full_sql_script():
         ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Legs')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Back')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Chest')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Biceps')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Shoulders')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Triceps')), ((SELECT id FROM day1), (SELECT id FROM focus_areas WHERE name = 'Abs'));
     INSERT INTO routines (name) VALUES ('Adaptive'), ('Custom');
     """
+    return schema_sql
 
-    # Fetch all valid equipment names from the DB to check against the JSON
-    # This prevents silent failures from typos in the JSON file
-    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM equipment;")
-    valid_equipment_names = {row[0] for row in cursor.fetchall()}
-    cursor.close()
-    conn.close()
 
+def generate_dynamic_exercises_sql(valid_equipment_names: set):
+    """
+    Generate only the dynamic exercise INSERT statements from excercise1.json.
+    This runs after schema is applied so FK lookups (focus_areas, equipment, etc.) exist.
+    """
+    import json
     insert_commands = ["\n-- ========= DYNAMICALLY INSERTED EXERCISE DATA =========\n"]
     def sql_escape(text):
         if text is None:
@@ -722,7 +716,6 @@ def generate_full_sql_script():
 
     processed_exercise_names = set()
 
-    # --- THE ROBUST DATA LOADING LOGIC ---
     for ex in exercise_data:
         ex_name = sql_escape(ex['name'])
         if ex_name in processed_exercise_names:
@@ -731,41 +724,38 @@ def generate_full_sql_script():
         processed_exercise_names.add(ex_name)
 
         ex_desc = sql_escape(ex.get('desc', ''))
-        
+
         type_mapping = {"Strength Training": "strength", "Muscle Growth": "muscle_growth", "Calorie Burning": "cardio"}
         json_types = ex.get('type', [])
-        ex_type = 'strength' # Default
+        ex_type = 'strength'
         for t in json_types:
             if t in type_mapping:
                 ex_type = type_mapping[t]
                 break
-        
+
         ex_impact = ex.get('is_high_impact', False)
         primary_focus_area_name = sql_escape(ex['focus_areas'][0]) if ex.get('focus_areas') else 'Full Body'
 
-        # New logic to handle combined equipment names
+        # Handle combined equipment names like "Barbell/Dumbbells"
         raw_equipment = ex.get('equipment', [])
         processed_equipment = set()
         for item in raw_equipment:
-            # Split by slashes and trim whitespace
             parts = [p.strip() for p in item.split('/')]
             for part in parts:
                 if part in valid_equipment_names:
                     processed_equipment.add(part)
-                else:
-                    # This is where the warning is generated
-                    pass
 
-        # Get video_url and image_url from JSON if available
         ex_video_url = sql_escape(ex.get('video_url', ''))
         ex_image_url = sql_escape(ex.get('image_url', ''))
-        
-        with_clauses = [f"new_exercise AS (INSERT INTO exercises (name, description, video_url, image_url, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', NULLIF('{ex_video_url}', ''), NULLIF('{ex_image_url}', ''), '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"]
-        
+
+        with_clauses = [
+            f"new_exercise AS (INSERT INTO exercises (name, description, video_url, image_url, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', NULLIF('{ex_video_url}', ''), NULLIF('{ex_image_url}', ''), '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"
+        ]
+
         if ex.get('difficulty_levels'):
             difficulty_selects = [f"SELECT id, '{level.lower()}'::fitness_level_enum FROM new_exercise" for level in ex['difficulty_levels']]
             with_clauses.append(f"ins_difficulty AS (INSERT INTO exercise_fitness_levels (exercise_id, fitness_level) {' UNION ALL '.join(difficulty_selects)})")
-        
+
         if ex.get('focus_areas'):
             focus_area_selects = []
             for i, area in enumerate(ex['focus_areas']):
@@ -776,7 +766,6 @@ def generate_full_sql_script():
         if processed_equipment:
             equipment_selects = []
             for equip_name in processed_equipment:
-                # No need to escape again, it's already clean from the set
                 equipment_selects.append(f"SELECT (SELECT id FROM new_exercise), (SELECT id FROM equipment WHERE name = '{equip_name}')")
             if equipment_selects:
                 with_clauses.append(f"ins_equipment AS (INSERT INTO exercise_equipment (exercise_id, equipment_id) {' UNION ALL '.join(equipment_selects)})")
@@ -784,11 +773,11 @@ def generate_full_sql_script():
         if ex.get('contraindications'):
             contra_selects = [f"SELECT id, (SELECT id FROM health_issues WHERE name = '{sql_escape(issue)}') FROM new_exercise" for issue in ex['contraindications']]
             with_clauses.append(f"ins_contra AS (INSERT INTO exercise_contraindications (exercise_id, health_issue_id) {' UNION ALL '.join(contra_selects)})")
-        
+
         full_statement = "WITH " + ",\n".join(with_clauses) + "\nSELECT 1;"
         insert_commands.append(full_statement)
-        
-    return schema_sql + "\n".join(insert_commands)
+
+    return "\n".join(insert_commands)
 
 
 
@@ -796,22 +785,55 @@ def main():
     if not create_database():
         print("Failed to create or verify database existence. Exiting...")
         return
-    
-    print("Generating full SQL script...")
-    full_sql_script = generate_full_sql_script()
-    
-    temp_sql_file = "temp_schema_and_data.sql"
-    with open(temp_sql_file, "w", encoding='utf-8') as f:
-        f.write(full_sql_script)
-    
+
+    # Phase 1: Apply schema and seed lookup/template data
+    print("Generating schema SQL...")
+    schema_sql = generate_schema_sql()
+
+    temp_schema_file = "temp_schema.sql"
+    with open(temp_schema_file, "w", encoding='utf-8') as f:
+        f.write(schema_sql)
+
     try:
-        if execute_sql_file(temp_sql_file, DB_NAME):
+        if not execute_sql_file(temp_schema_file, DB_NAME):
+            print("\nSchema setup failed. Please check the errors above.")
+            return
+    finally:
+        if os.path.exists(temp_schema_file):
+            os.remove(temp_schema_file)
+
+    # Phase 2: Generate dynamic exercise data after schema is applied
+    print("Generating dynamic exercise data SQL...")
+    # Fetch valid equipment names from the DB now that the table exists
+    try:
+        conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM equipment;")
+        valid_equipment_names = {row[0] for row in cur.fetchall()}
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    dynamic_sql = generate_dynamic_exercises_sql(valid_equipment_names)
+
+    temp_data_file = "temp_exercises.sql"
+    with open(temp_data_file, "w", encoding='utf-8') as f:
+        f.write(dynamic_sql)
+
+    try:
+        if execute_sql_file(temp_data_file, DB_NAME):
             print("\nDatabase setup complete! New routine system is in place.")
         else:
-            print("\nDatabase setup failed. Please check the errors above.")
+            print("\nDynamic exercise data load failed. Please check the errors above.")
     finally:
-        if os.path.exists(temp_sql_file):
-            os.remove(temp_sql_file)
+        if os.path.exists(temp_data_file):
+            os.remove(temp_data_file)
 
 if __name__ == "__main__":
     main()
