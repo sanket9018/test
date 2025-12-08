@@ -622,6 +622,28 @@ class StartWorkoutResponse(BaseModel):
     workout_session: WorkoutSessionResponse
     exercises: List[WorkoutSessionExerciseResponse]
 
+
+class SaveWorkoutRequest(BaseModel):
+    """Request model for saving current workout list into the active routine day."""
+    exercises: List[Dict[str, Any]] = Field(..., description="List of exercises; each item must contain exercise_id")
+    target_day_number: Optional[int] = Field(None, ge=1, le=7, description="Optional override of day number; defaults to computed active day")
+
+
+class SaveWorkoutSavedExercise(BaseModel):
+    """Saved exercise with order information."""
+    exercise_id: int
+    order_in_day: int
+    name: Optional[str] = None
+
+
+class SaveWorkoutResponse(BaseModel):
+    """Response model for saved workout list."""
+    message: str
+    user_routine_id: int
+    day_number: int
+    total_saved: int
+    exercises: List[SaveWorkoutSavedExercise]
+
 class LogSetRequest(BaseModel):
     """Request model for logging a set."""
     workout_session_exercise_id: int = Field(..., gt=0, description="ID of the workout session exercise")

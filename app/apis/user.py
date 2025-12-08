@@ -2062,6 +2062,63 @@ async def get_workout_status(
     )
 
 
+@router.post("/user/me/workout/save", response_model=SaveWorkoutResponse)
+async def save_workout_into_active_day(
+    request_data: SaveWorkoutRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Save the current list of exercises (generated/custom or active session selection)
+    into the user's active routine day. This replaces that day's content and switches
+    it to direct_exercises mode.
+    """
+    # Auth
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    # Validate payload
+    if not request_data.exercises or not isinstance(request_data.exercises, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'exercises' must be a non-empty list")
+
+    exercise_ids: list[int] = []
+    for item in request_data.exercises:
+        eid = item.get('exercise_id') if isinstance(item, dict) else None
+        if not eid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each item must include exercise_id")
+        exercise_ids.append(int(eid))
+
+    # Ensure all exercise IDs exist
+    rows = await conn.fetch("SELECT id FROM exercises WHERE id = ANY($1::int[])", exercise_ids)
+    existing_ids = {r['id'] for r in rows}
+    missing = [eid for eid in exercise_ids if eid not in existing_ids]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid exercise_ids: {missing}")
+
+    # Replace the active day's exercises
+    result = await db_queries.replace_routine_day_exercises(
+        conn,
+        user_id=user_id,
+        day_number=request_data.target_day_number,
+        exercise_ids=exercise_ids,
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active routine/day not found")
+
+    saved_list = [SaveWorkoutSavedExercise(exercise_id=e['exercise_id'], order_in_day=e['order_in_day'], name=e.get('name')) for e in result['exercises']]
+
+    return SaveWorkoutResponse(
+        message="Workout saved to active day successfully",
+        user_routine_id=result['user_routine_id'],
+        day_number=result['day_number'],
+        total_saved=len(saved_list),
+        exercises=saved_list,
+    )
+
+
 @router.post("/user/workout/log-set")
 async def log_workout_set(
     request_data: LogSetRequest,

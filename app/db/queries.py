@@ -592,6 +592,152 @@ async def get_exercise_details(conn: asyncpg.Connection, exercise_id: int) -> Op
     return await conn.fetchrow(query, exercise_id)
 
 
+async def get_active_routine_day_info(
+    conn: asyncpg.Connection,
+    user_id: int,
+    override_day_number: Optional[int] = None,
+) -> Optional[asyncpg.Record]:
+    """
+    Returns the active user_routine_id, computed (or overridden) day_number, and the
+    corresponding user_routine_day_id for the given user.
+    """
+    query = """
+    WITH ActiveRoutineInfo AS (
+        SELECT
+            ur.id AS user_routine_id,
+            ur.current_day_number,
+            u.created_at,
+            COUNT(urd.id) AS total_routine_days,
+            r.name AS routine_name
+        FROM users u
+        JOIN user_routines ur ON u.id = ur.user_id
+        JOIN routines r ON ur.routine_id = r.id
+        JOIN user_routine_days urd ON ur.id = urd.user_routine_id
+        WHERE u.id = $1 AND ur.is_active = TRUE
+        GROUP BY ur.id, u.created_at, r.name
+        HAVING COUNT(urd.id) > 0
+    ),
+    CurrentDay AS (
+        SELECT
+            ari.user_routine_id,
+            ari.routine_name,
+            COALESCE(
+                $2, -- override_day_number if provided
+                COALESCE(
+                    ari.current_day_number,
+                    (EXTRACT(DAY FROM (NOW() - ari.created_at))::int % ari.total_routine_days) + 1
+                )
+            ) AS day_number
+        FROM ActiveRoutineInfo ari
+    )
+    SELECT
+        cd.user_routine_id,
+        cd.routine_name,
+        cd.day_number,
+        urd.id AS user_routine_day_id
+    FROM CurrentDay cd
+    JOIN user_routine_days urd
+      ON urd.user_routine_id = cd.user_routine_id
+     AND urd.day_number = cd.day_number;
+    """
+    return await conn.fetchrow(query, user_id, override_day_number)
+
+
+async def replace_routine_day_exercises(
+    conn: asyncpg.Connection,
+    user_id: int,
+    day_number: Optional[int],
+    exercise_ids: List[int],
+) -> Optional[Dict[str, Any]]:
+    """
+    Replaces the specified active routine day's content with the provided exercises.
+
+    - Switches the day to 'direct_exercises' mode
+    - Clears focus areas and previous direct exercises
+    - Inserts the given exercises with increasing order_in_day
+    Returns dict with user_routine_id, day_number and list of saved exercises including names and order.
+    """
+    day_info = await get_active_routine_day_info(conn, user_id, day_number)
+    if not day_info:
+        return None
+
+    user_routine_day_id = day_info['user_routine_day_id']
+
+    # De-duplicate while preserving order
+    seen = set()
+    ordered_unique_ids: List[int] = []
+    for eid in exercise_ids:
+        if eid and eid not in seen:
+            seen.add(eid)
+            ordered_unique_ids.append(int(eid))
+
+    async with conn.transaction():
+        # Ensure ownership: user_routine_day_id belongs to this user
+        owner_check = await conn.fetchval(
+            """
+            SELECT 1
+            FROM user_routine_days urd
+            JOIN user_routines ur ON urd.user_routine_id = ur.id
+            WHERE urd.id = $1 AND ur.user_id = $2
+            """,
+            user_routine_day_id,
+            user_id,
+        )
+        if not owner_check:
+            return None
+
+        # Switch mode to direct_exercises and clear previous content
+        await conn.execute(
+            "UPDATE user_routine_days SET exercise_mode = 'direct_exercises' WHERE id = $1",
+            user_routine_day_id,
+        )
+        await conn.execute(
+            "DELETE FROM user_routine_day_focus_areas WHERE user_routine_day_id = $1",
+            user_routine_day_id,
+        )
+        await conn.execute(
+            "DELETE FROM user_routine_day_exercises WHERE user_routine_day_id = $1",
+            user_routine_day_id,
+        )
+
+        # Insert new exercises with order
+        for idx, eid in enumerate(ordered_unique_ids, start=1):
+            await conn.execute(
+                """
+                INSERT INTO user_routine_day_exercises (user_routine_day_id, exercise_id, order_in_day)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_routine_day_id, exercise_id) DO UPDATE SET order_in_day = EXCLUDED.order_in_day
+                """,
+                user_routine_day_id,
+                eid,
+                idx,
+            )
+
+    rows = await conn.fetch(
+        """
+        SELECT urde.exercise_id, e.name, urde.order_in_day
+        FROM user_routine_day_exercises urde
+        JOIN exercises e ON e.id = urde.exercise_id
+        WHERE urde.user_routine_day_id = $1
+        ORDER BY urde.order_in_day
+        """,
+        user_routine_day_id,
+    )
+
+    return {
+        "user_routine_id": day_info["user_routine_id"],
+        "day_number": day_info["day_number"],
+        "exercises": [
+            {
+                "exercise_id": r["exercise_id"],
+                "name": r["name"],
+                "order_in_day": r["order_in_day"],
+            }
+            for r in rows
+        ],
+    }
+
+
 async def get_profile_and_active_day_focus(conn: asyncpg.Connection, user_id: int):
     """
     Fetches a user's base profile AND the focus area IDs for their currently
