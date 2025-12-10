@@ -1604,6 +1604,53 @@ async def get_combined_exercises(
         for ex in filtered_routine_day_exercises_data
     ]
 
+    # If the active day is set to direct_exercises and has saved items, make that the primary list
+    try:
+        active_days = await db_queries.get_active_routine_days(conn, user_id)
+        if active_days:
+            days_val = active_days['days']
+            if isinstance(days_val, str):
+                days = json.loads(days_val)
+            else:
+                days = days_val
+
+            current_day = next((d for d in days if d.get('is_current_day')), None)
+            if current_day and current_day.get('exercise_mode') == 'direct_exercises':
+                direct_list = current_day.get('direct_exercises') or []
+                # Filter excluded
+                direct_list = [d for d in direct_list if d.get('id') and d['id'] not in excluded_ids]
+                # Map existing generated values by exercise_id
+                gen_map = {ex['exercise_id']: ex for ex in filtered_generated_exercises_data}
+
+                # Build UserGeneratedExerciseResponse items in saved order
+                overridden = []
+                now_ts = datetime.utcnow()
+                for idx, d in enumerate(sorted(direct_list, key=lambda x: x.get('order_in_day', idx+1)), start=1):
+                    ex_id = d['id']
+                    base = gen_map.get(ex_id)
+                    overridden.append(
+                        UserGeneratedExerciseResponse(
+                            id=base['id'] if base else ex_id,  # not used on UI; fallback to ex_id
+                            exercise_id=ex_id,
+                            name=d.get('name', base['name'] if base else ''),
+                            description=d.get('description', base['description'] if base else None),
+                            video_url=d.get('video_url', base['video_url'] if base else None),
+                            primary_focus_area=base['primary_focus_area'] if base else None,
+                            weight_kg=base['weight_kg'] if base else 0.0,
+                            reps=base['reps'] if base else 12,
+                            sets=base['sets'] if base else 3,
+                            one_rm_calculated=base['one_rm_calculated'] if base else 0.0,
+                            generated_at=base['generated_at'] if base else now_ts,
+                            updated_at=base['updated_at'] if base else now_ts,
+                        )
+                    )
+
+                if overridden:
+                    generated_exercises = overridden
+    except Exception:
+        # If anything goes wrong, fall back to original generated list
+        pass
+
     return CombinedExercisesResponse(
         generated_exercises=generated_exercises,
         custom_exercises=custom_exercises,
