@@ -686,6 +686,13 @@ async def replace_routine_day_exercises(
         if not owner_check:
             return None
 
+        # Persist the resolved day_number as the active day to keep /generate consistent
+        await conn.execute(
+            "UPDATE user_routines SET current_day_number = $1 WHERE id = $2",
+            day_info["day_number"],
+            day_info["user_routine_id"],
+        )
+
         # Switch mode to direct_exercises and clear previous content
         await conn.execute(
             "UPDATE user_routine_days SET exercise_mode = 'direct_exercises' WHERE id = $1",
