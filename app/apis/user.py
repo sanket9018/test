@@ -2114,6 +2114,158 @@ async def get_workout_status(
     )
 
 
+@router.delete("/user/me/exercises/{exercise_id}")
+async def remove_exercise_from_current_plan(
+    exercise_id: int,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Remove an exercise from the user's current plan everywhere it may appear:
+    - user_generated_exercises
+    - user_custom_exercises
+    - active workout session (and its logs via ON DELETE CASCADE)
+    - saved active routine day (direct_exercises list), with order re-numbering
+    """
+    # Auth
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry["user_id"]
+
+    removed_generated = False
+    removed_custom = False
+    removed_saved_day = False
+    session_exercises_removed = 0
+    logs_deleted = 0
+
+    async with conn.transaction():
+        # Delete from generated
+        gen_row = await conn.fetchrow(
+            """
+            DELETE FROM user_generated_exercises
+            WHERE user_id = $1 AND exercise_id = $2
+            RETURNING id
+            """,
+            user_id,
+            exercise_id,
+        )
+        removed_generated = gen_row is not None
+
+        # Delete from custom
+        custom_row = await conn.fetchrow(
+            """
+            DELETE FROM user_custom_exercises
+            WHERE user_id = $1 AND exercise_id = $2
+            RETURNING id
+            """,
+            user_id,
+            exercise_id,
+        )
+        removed_custom = custom_row is not None
+
+        # Delete from active workout session (and cascade delete its logs)
+        active_session_id = await conn.fetchval(
+            """
+            SELECT id FROM workout_sessions
+            WHERE user_id = $1 AND status = 'active'
+            """,
+            user_id,
+        )
+        if active_session_id:
+            # Find session exercise IDs to compute log count before deletion
+            wse_rows = await conn.fetch(
+                """
+                SELECT id FROM workout_session_exercises
+                WHERE workout_session_id = $1 AND exercise_id = $2
+                """,
+                active_session_id,
+                exercise_id,
+            )
+            wse_ids = [r["id"] for r in wse_rows]
+            if wse_ids:
+                logs_deleted = await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM workout_logs
+                    WHERE workout_session_exercise_id = ANY($1::bigint[])
+                    """,
+                    wse_ids,
+                ) or 0
+
+                del_rows = await conn.fetch(
+                    """
+                    DELETE FROM workout_session_exercises
+                    WHERE workout_session_id = $1 AND exercise_id = $2
+                    RETURNING id
+                    """,
+                    active_session_id,
+                    exercise_id,
+                )
+                session_exercises_removed = len(del_rows)
+                if session_exercises_removed:
+                    # Re-number order_in_workout to keep ordering clean
+                    await conn.execute(
+                        """
+                        WITH ordered AS (
+                            SELECT id, ROW_NUMBER() OVER (ORDER BY order_in_workout) AS rn
+                            FROM workout_session_exercises
+                            WHERE workout_session_id = $1
+                        )
+                        UPDATE workout_session_exercises wse
+                        SET order_in_workout = ordered.rn
+                        FROM ordered
+                        WHERE wse.id = ordered.id;
+                        """,
+                        active_session_id,
+                    )
+
+        # Delete from saved active routine day (direct_exercises)
+        day_info = await db_queries.get_active_routine_day_info(conn, user_id)
+        if day_info:
+            urd_id = day_info["user_routine_day_id"]
+            del_saved = await conn.fetchrow(
+                """
+                DELETE FROM user_routine_day_exercises
+                WHERE user_routine_day_id = $1 AND exercise_id = $2
+                RETURNING id
+                """,
+                urd_id,
+                exercise_id,
+            )
+            removed_saved_day = del_saved is not None
+
+            if removed_saved_day:
+                # Re-number order_in_day to keep ordering clean
+                await conn.execute(
+                    """
+                    WITH ordered AS (
+                        SELECT id, ROW_NUMBER() OVER (ORDER BY order_in_day) AS rn
+                        FROM user_routine_day_exercises
+                        WHERE user_routine_day_id = $1
+                    )
+                    UPDATE user_routine_day_exercises urde
+                    SET order_in_day = ordered.rn
+                    FROM ordered
+                    WHERE urde.id = ordered.id;
+                    """,
+                    urd_id,
+                )
+
+    return {
+        "message": "Exercise removed from current plan",
+        "removed_from": {
+            "generated": removed_generated,
+            "custom": removed_custom,
+            "saved_day": removed_saved_day,
+            "active_workout": {
+                "exercises_removed": session_exercises_removed,
+                "logs_deleted": logs_deleted,
+            },
+        },
+    }
+
+
 @router.post("/user/me/workout/save", response_model=SaveWorkoutResponse)
 async def save_workout_into_active_day(
     request_data: SaveWorkoutRequest,
