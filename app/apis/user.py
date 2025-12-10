@@ -1523,8 +1523,11 @@ async def get_combined_exercises(
     conn: asyncpg.Connection = Depends(get_db)
 ):
     """
-    Returns generated exercises, custom exercises, and exercises from active routine days for the user.
-    This endpoint combines all types of exercises the user has access to.
+    Unified endpoint that returns a single 'final' list of exercises for the user.
+    Rules:
+    - If the current routine day is saved (direct_exercises), return that saved list in order.
+    - Otherwise, return generated exercises + any custom exercises (merged, de-duplicated).
+    - Exclusions are respected across all sources.
     """
     access_token = await get_access_token_from_header(request)
     token_entry = await db_queries.fetch_access_token(conn, access_token)
@@ -1532,131 +1535,133 @@ async def get_combined_exercises(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     user_id = token_entry['user_id']
 
-    # Get user's excluded exercises (both forever and today)
-    excluded_exercise_ids = await conn.fetch("""
-        SELECT exercise_id FROM user_excluded_exercises_forever 
-        WHERE user_id = $1
+    # Exclusions (forever + today)
+    excluded_rows = await conn.fetch(
+        """
+        SELECT exercise_id FROM user_excluded_exercises_forever WHERE user_id = $1
         UNION
-        SELECT exercise_id FROM user_excluded_exercises_today 
-        WHERE user_id = $1 AND excluded_date = CURRENT_DATE
-    """, user_id)
-    
-    excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
+        SELECT exercise_id FROM user_excluded_exercises_today WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+        """,
+        user_id,
+    )
+    excluded_ids = {r["exercise_id"] for r in excluded_rows}
 
-    # Get generated exercises
-    generated_exercises_data = await db_queries.get_user_generated_exercises(conn, user_id)
-    # Filter out excluded exercises from generated exercises
-    filtered_generated_exercises_data = [ex for ex in generated_exercises_data if ex['exercise_id'] not in excluded_ids]
-    generated_exercises = [
-        UserGeneratedExerciseResponse(
-            id=ex['id'],
-            exercise_id=ex['exercise_id'],
-            name=ex['name'],
-            description=ex['description'],
-            video_url=ex['video_url'],
-            primary_focus_area=ex['primary_focus_area'],
-            weight_kg=ex['weight_kg'],
-            reps=ex['reps'],
-            sets=ex['sets'],
-            one_rm_calculated=ex['one_rm_calculated'],
-            generated_at=ex['generated_at'],
-            updated_at=ex['updated_at']
-        )
-        for ex in filtered_generated_exercises_data
-    ]
+    # Source A: generated exercises
+    gen_rows = await db_queries.get_user_generated_exercises(conn, user_id)
+    gen_rows = [r for r in gen_rows if r["exercise_id"] not in excluded_ids]
 
-    # Get custom exercises
-    custom_exercises_data = await get_user_custom_exercises(conn, user_id)
-    # Filter out excluded exercises from custom exercises
-    filtered_custom_exercises_data = [ex for ex in custom_exercises_data if ex['exercise_id'] not in excluded_ids]
-    custom_exercises = [
-        CustomExerciseResponse(
-            id=ex['id'],
-            exercise_id=ex['exercise_id'],
-            name=ex['name'],
-            description=ex['description'],
-            video_url=ex['video_url'],
-            primary_focus_area=ex['primary_focus_area'],
-            weight_kg=ex['weight_kg'],
-            reps=ex['reps'],
-            sets=ex['sets'],
-            one_rm_calculated=ex['one_rm_calculated'],
-            added_at=ex['added_at']
-        )
-        for ex in filtered_custom_exercises_data
-    ]
+    # Source B: custom exercises
+    custom_rows = await get_user_custom_exercises(conn, user_id)
+    custom_rows = [r for r in custom_rows if r["exercise_id"] not in excluded_ids]
 
-    # Get routine day exercises
-    routine_day_exercises_data = await get_user_routine_day_exercises(conn, user_id)
-    # Filter out excluded exercises from routine day exercises
-    filtered_routine_day_exercises_data = [ex for ex in routine_day_exercises_data if ex['exercise_id'] not in excluded_ids]
-    routine_day_exercises = [
-        RoutineDayExerciseResponse(
-            exercise_id=ex['exercise_id'],
-            name=ex['name'],
-            description=ex['description'],
-            video_url=ex['video_url'],
-            primary_focus_area=ex['primary_focus_area'],
-            order_in_day=ex['order_in_day'],
-            day_number=ex['day_number'],
-            routine_name=ex['routine_name']
-        )
-        for ex in filtered_routine_day_exercises_data
-    ]
+    # Helper mappers (prefer custom values over generated for same exercise_id)
+    def map_from_generated(r: Any) -> Dict[str, Any]:
+        return {
+            "exercise_id": r["exercise_id"],
+            "name": r["name"],
+            "description": r.get("description"),
+            "video_url": r.get("video_url"),
+            "primary_focus_area": r.get("primary_focus_area"),
+            "weight_kg": float(r["weight_kg"]) if r.get("weight_kg") is not None else 0.0,
+            "reps": r.get("reps", 12),
+            "sets": r.get("sets", 3),
+            "one_rm_calculated": float(r.get("one_rm_calculated", 0.0)),
+            "is_custom": False,
+            "source": "generated",
+        }
 
-    # If the active day is set to direct_exercises and has saved items, make that the primary list
+    def map_from_custom(r: Any) -> Dict[str, Any]:
+        return {
+            "exercise_id": r["exercise_id"],
+            "name": r["name"],
+            "description": r.get("description"),
+            "video_url": r.get("video_url"),
+            "primary_focus_area": r.get("primary_focus_area"),
+            "weight_kg": float(r.get("weight_kg", 0.0)),
+            "reps": r.get("reps", 12),
+            "sets": r.get("sets", 3),
+            "one_rm_calculated": float(r.get("one_rm_calculated", 0.0)),
+            "is_custom": True,
+            "source": "custom",
+        }
+
+    # Build base map by exercise_id (custom takes precedence)
+    base_by_id: Dict[int, Dict[str, Any]] = {}
+    for r in gen_rows:
+        base_by_id[r["exercise_id"]] = map_from_generated(r)
+    for r in custom_rows:
+        base_by_id[r["exercise_id"]] = map_from_custom(r)
+
+    # Saved routine-day detail (for fallback names/order when saved)
+    routine_rows = await get_user_routine_day_exercises(conn, user_id)
+    routine_rows = [r for r in routine_rows if r["exercise_id"] not in excluded_ids]
+    routine_by_id: Dict[int, Any] = {r["exercise_id"]: r for r in routine_rows}
+
+    final_list: List[Dict[str, Any]] = []
+
+    # If the active day is saved as direct_exercises, use that exact order
     try:
         active_days = await db_queries.get_active_routine_days(conn, user_id)
         if active_days:
-            days_val = active_days['days']
-            if isinstance(days_val, str):
-                days = json.loads(days_val)
-            else:
-                days = days_val
+            days_val = active_days["days"]
+            days = json.loads(days_val) if isinstance(days_val, str) else days_val
+            current_day = next((d for d in days if d.get("is_current_day")), None)
+            if current_day and current_day.get("exercise_mode") == "direct_exercises":
+                direct_list = current_day.get("direct_exercises") or []
+                # Filter excluded and order
+                ordered_direct = [d for d in direct_list if d.get("id") and d["id"] not in excluded_ids]
+                ordered_direct = sorted(
+                    ordered_direct,
+                    key=lambda x: x.get("order_in_day", 999999)
+                )
 
-            current_day = next((d for d in days if d.get('is_current_day')), None)
-            if current_day and current_day.get('exercise_mode') == 'direct_exercises':
-                direct_list = current_day.get('direct_exercises') or []
-                # Filter excluded
-                direct_list = [d for d in direct_list if d.get('id') and d['id'] not in excluded_ids]
-                # Map existing generated values by exercise_id
-                gen_map = {ex['exercise_id']: ex for ex in filtered_generated_exercises_data}
+                for d in ordered_direct:
+                    ex_id = int(d["id"])
+                    base = base_by_id.get(ex_id)
+                    if base:
+                        item = {**base, "order_in_day": d.get("order_in_day")}
+                    else:
+                        r = routine_by_id.get(ex_id)
+                        item = {
+                            "exercise_id": ex_id,
+                            "name": d.get("name") or (r["name"] if r else ""),
+                            "description": d.get("description") or (r["description"] if r else None),
+                            "video_url": d.get("video_url") or (r["video_url"] if r else None),
+                            "primary_focus_area": r["primary_focus_area"] if r else None,
+                            "weight_kg": 0.0,
+                            "reps": 12,
+                            "sets": 3,
+                            "one_rm_calculated": 0.0,
+                            "is_custom": False,
+                            "source": "routine",
+                            "order_in_day": d.get("order_in_day"),
+                        }
+                    final_list.append(item)
 
-                # Build UserGeneratedExerciseResponse items in saved order
-                overridden = []
-                now_ts = datetime.utcnow()
-                for idx, d in enumerate(sorted(direct_list, key=lambda x: x.get('order_in_day', idx+1)), start=1):
-                    ex_id = d['id']
-                    base = gen_map.get(ex_id)
-                    overridden.append(
-                        UserGeneratedExerciseResponse(
-                            id=base['id'] if base else ex_id,  # not used on UI; fallback to ex_id
-                            exercise_id=ex_id,
-                            name=d.get('name', base['name'] if base else ''),
-                            description=d.get('description', base['description'] if base else None),
-                            video_url=d.get('video_url', base['video_url'] if base else None),
-                            primary_focus_area=base['primary_focus_area'] if base else None,
-                            weight_kg=base['weight_kg'] if base else 0.0,
-                            reps=base['reps'] if base else 12,
-                            sets=base['sets'] if base else 3,
-                            one_rm_calculated=base['one_rm_calculated'] if base else 0.0,
-                            generated_at=base['generated_at'] if base else now_ts,
-                            updated_at=base['updated_at'] if base else now_ts,
-                        )
-                    )
-
-                if overridden:
-                    generated_exercises = overridden
     except Exception:
-        # If anything goes wrong, fall back to original generated list
+        # Ignore and fall back to unsaved mode below
         pass
 
-    return CombinedExercisesResponse(
-        generated_exercises=generated_exercises,
-        custom_exercises=custom_exercises,
-        routine_day_exercises=routine_day_exercises,
-        total_count=len(generated_exercises) + len(custom_exercises) + len(routine_day_exercises)
-    )
+    if not final_list:
+        # Not saved: return generated first then custom (no duplicates)
+        seen: set[int] = set()
+        for r in gen_rows:
+            ex_id = r["exercise_id"]
+            if ex_id in seen:
+                continue
+            final_list.append(map_from_generated(r))
+            seen.add(ex_id)
+        for r in custom_rows:
+            ex_id = r["exercise_id"]
+            if ex_id in seen:
+                continue
+            final_list.append(map_from_custom(r))
+            seen.add(ex_id)
+
+    return {
+        "final": final_list,
+        "total_count": len(final_list)
+    }
 
 
 @router.post("/user/me/exercises/alternatives", response_model=AlternativeExercisesResponse)
