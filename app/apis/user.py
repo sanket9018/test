@@ -1642,6 +1642,20 @@ async def get_combined_exercises(
         # Ignore and fall back to unsaved mode below
         pass
 
+    # If we have a saved-day list, also include any extra custom exercises
+    # that are not already present in final_list. This covers the case where
+    # the user saves a workout (direct_exercises) and later adds new custom
+    # exercises which should still appear in the unified final list until
+    # the workout is saved again.
+    if final_list:
+        present_ids = {item.get("exercise_id") for item in final_list}
+        for r in custom_rows:
+            ex_id = r["exercise_id"]
+            if ex_id in present_ids:
+                continue
+            extra = map_from_custom(r)
+            final_list.append(extra)
+
     if not final_list:
         # Not saved: return generated first then custom (no duplicates)
         seen: set[int] = set()
