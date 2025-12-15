@@ -12,19 +12,26 @@ async def add_custom_exercise(conn: asyncpg.Connection, user_id: int, exercise_i
         Returns None if exercise is excluded (forever or today).
     """
     async with conn.transaction():
-        # Check if exercise is excluded (forever or today)
+        # Check if exercise is permanently excluded (forever)
         exclusion_check = await conn.fetchrow("""
             SELECT 1 FROM user_excluded_exercises_forever 
             WHERE user_id = $1 AND exercise_id = $2
-            UNION
-            SELECT 1 FROM user_excluded_exercises_today 
-            WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
         """, user_id, exercise_id)
         
         if exclusion_check:
-            # Exercise is excluded, don't add it
+            # Exercise is permanently excluded, don't add it
             return None
-        
+
+        # If it was previously excluded "today", clear that soft exclusion
+        await conn.execute(
+            """
+            DELETE FROM user_excluded_exercises_today
+            WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
+            """,
+            user_id,
+            exercise_id,
+        )
+
         # Get user's matrix settings
         user_query = """
         SELECT is_matrix, randomness, duration, rest_time, objective, 

@@ -118,7 +118,7 @@ def generate_schema_sql():
     DROP FUNCTION IF EXISTS assign_default_routines_to_user();
 
     DROP TABLE IF EXISTS 
-        user_routine_day_focus_areas, user_routine_day_exercises, user_routine_days, user_routines,
+        user_excluded_exercises_today, user_excluded_exercises_forever, user_routine_day_focus_areas, user_routine_day_exercises, user_routine_days, user_routines,
         routine_day_focus_areas, routine_days,
         weight_history, body_measurement_history, user_workout_days,
         workout_history, workout_logs, workout_session_exercises, workout_sessions,

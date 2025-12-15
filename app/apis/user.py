@@ -345,6 +345,72 @@ async def generate_workout_plan(
 
     user_id = token_entry['user_id']
 
+    async with db.transaction():
+        active_session = await db.fetchrow(
+            """
+            SELECT id, started_at
+            FROM workout_sessions
+            WHERE user_id = $1 AND status = 'active'
+            """,
+            user_id,
+        )
+
+        if active_session:
+            workout_stats = await db.fetchrow(
+                """
+                SELECT 
+                    COUNT(DISTINCT wse.exercise_id) as total_exercises,
+                    COUNT(wl.id) as total_sets,
+                    EXTRACT(EPOCH FROM (NOW() - $2))::INTEGER as total_duration_seconds
+                FROM workout_session_exercises wse
+                LEFT JOIN workout_logs wl ON wse.id = wl.workout_session_exercise_id
+                WHERE wse.workout_session_id = $1
+                """,
+                active_session['id'],
+                active_session['started_at'],
+            )
+
+            await db.execute(
+                """
+                UPDATE workout_sessions 
+                SET status = 'completed', 
+                    completed_at = NOW(), 
+                    total_duration_seconds = $2,
+                    notes = $3
+                WHERE id = $1
+                """,
+                active_session['id'],
+                workout_stats['total_duration_seconds'],
+                None,
+            )
+
+            await db.execute(
+                """
+                INSERT INTO workout_history 
+                (user_id, workout_session_id, workout_date, total_exercises, total_sets, 
+                 total_duration_seconds, calories_burned, notes)
+                VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7)
+                """,
+                user_id,
+                active_session['id'],
+                workout_stats['total_exercises'],
+                workout_stats['total_sets'],
+                workout_stats['total_duration_seconds'],
+                0,
+                None,
+            )
+
+        # Clear any "today" exclusions so a new generation always starts fresh
+        await db.execute(
+            """
+            DELETE FROM user_excluded_exercises_today
+            WHERE user_id = $1 AND excluded_date = CURRENT_DATE
+            """,
+            user_id,
+        )
+
+        await clear_user_custom_exercises(db, user_id)
+
     # Step 2: Fetch user profile and current day's workout data from active routine
     user_data = await db_queries.get_profile_for_workout_generation(db, user_id)
     print("user_data", user_data)
@@ -373,13 +439,10 @@ async def generate_workout_plan(
                 detail="No direct exercises found for today. Please add exercises to this day or switch to focus areas mode."
             )
         
-        # Filter out excluded exercises from direct exercises
+        # Filter out permanently excluded exercises from direct exercises
         excluded_exercise_ids = await db.fetch("""
             SELECT exercise_id FROM user_excluded_exercises_forever 
             WHERE user_id = $1
-            UNION
-            SELECT exercise_id FROM user_excluded_exercises_today 
-            WHERE user_id = $1 AND excluded_date = CURRENT_DATE
         """, user_id)
         
         excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
@@ -467,14 +530,10 @@ async def generate_workout_plan(
     # Sort all exercises by ID for consistent ordering
     all_suitable_exercises = sorted(all_suitable_exercises, key=lambda r: r['id'])
 
-    # Step 4.5: Filter out excluded exercises
-    # Get user's excluded exercises (both forever and today)
+    # Step 4.5: Filter out permanently excluded exercises
     excluded_exercise_ids = await db.fetch("""
         SELECT exercise_id FROM user_excluded_exercises_forever 
         WHERE user_id = $1
-        UNION
-        SELECT exercise_id FROM user_excluded_exercises_today 
-        WHERE user_id = $1 AND excluded_date = CURRENT_DATE
     """, user_id)
     
     excluded_ids = {row['exercise_id'] for row in excluded_exercise_ids}
@@ -903,6 +962,8 @@ async def update_user_generated_exercise(
         sets=update_fields.get('sets')
     )
 
+    custom_updated = None
+
     # If not found in generated, try updating custom exercise
     if not updated_record:
         custom_updated = await update_user_custom_exercise(
@@ -914,34 +975,63 @@ async def update_user_generated_exercise(
             sets=update_fields.get('sets')
         )
 
-        if custom_updated:
-            return UpdateUserGeneratedExerciseResponse(
-                id=custom_updated['id'],
-                exercise_id=custom_updated['exercise_id'],
-                name=custom_updated['name'],
-                weight_kg=float(custom_updated['weight_kg']),
-                reps=custom_updated['reps'],
-                sets=custom_updated['sets'],
-                updated_at=custom_updated['updated_at'],
-                message="Custom exercise updated successfully"
+        if not custom_updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Exercise with ID {exercise_id} not found for this user"
             )
 
-        # If neither generated nor custom found, return 404
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Exercise with ID {exercise_id} not found for this user"
-        )
+    # Sync any active workout session's planned values for this exercise
+    active_session_id = await db.fetchval(
+        """
+        SELECT id
+        FROM workout_sessions
+        WHERE user_id = $1 AND status = 'active'
+        """,
+        user_id,
+    )
 
-    # Return the updated generated exercise data
+    if active_session_id:
+        set_clauses = []
+        params = [active_session_id, exercise_id]
+        param_index = 3
+
+        if 'sets' in update_fields:
+            set_clauses.append(f"planned_sets = ${param_index}")
+            params.append(update_fields['sets'])
+            param_index += 1
+
+        if 'reps' in update_fields:
+            set_clauses.append(f"planned_reps = ${param_index}")
+            params.append(update_fields['reps'])
+            param_index += 1
+
+        if 'weight_kg' in update_fields:
+            set_clauses.append(f"planned_weight_kg = ${param_index}")
+            params.append(update_fields['weight_kg'])
+            param_index += 1
+
+        if set_clauses:
+            set_clauses.append("updated_at = NOW()")
+            query = f"""
+            UPDATE workout_session_exercises
+            SET {', '.join(set_clauses)}
+            WHERE workout_session_id = $1 AND exercise_id = $2
+            """
+            await db.execute(query, *params)
+
+    record = updated_record if updated_record else custom_updated
+    message = "Exercise updated successfully" if updated_record else "Custom exercise updated successfully"
+
     return UpdateUserGeneratedExerciseResponse(
-        id=updated_record['id'],
-        exercise_id=updated_record['exercise_id'],
-        name=updated_record['name'],
-        weight_kg=float(updated_record['weight_kg']),
-        reps=updated_record['reps'],
-        sets=updated_record['sets'],
-        updated_at=updated_record['updated_at'],
-        message="Exercise updated successfully"
+        id=record['id'],
+        exercise_id=record['exercise_id'],
+        name=record['name'],
+        weight_kg=float(record['weight_kg']),
+        reps=record['reps'],
+        sets=record['sets'],
+        updated_at=record['updated_at'],
+        message=message
     )
 
 
@@ -1426,9 +1516,6 @@ async def add_custom_exercise_endpoint(
             exclusion_check = await conn.fetchrow("""
                 SELECT 1 FROM user_excluded_exercises_forever 
                 WHERE user_id = $1 AND exercise_id = $2
-                UNION
-                SELECT 1 FROM user_excluded_exercises_today 
-                WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
             """, user_id, request_data.exercise_id)
             
             if exclusion_check:
@@ -1596,6 +1683,85 @@ async def get_combined_exercises(
     routine_rows = await get_user_routine_day_exercises(conn, user_id)
     routine_rows = [r for r in routine_rows if r["exercise_id"] not in excluded_ids]
     routine_by_id: Dict[int, Any] = {r["exercise_id"]: r for r in routine_rows}
+
+    active_session = await conn.fetchrow(
+        """
+        SELECT id
+        FROM workout_sessions
+        WHERE user_id = $1 AND status = 'active'
+        """,
+        user_id,
+    )
+
+    if active_session:
+        session_rows = await conn.fetch(
+            """
+            SELECT 
+                wse.exercise_id,
+                wse.planned_sets,
+                wse.planned_reps,
+                wse.planned_weight_kg,
+                wse.order_in_workout,
+                e.name,
+                e.description,
+                e.video_url,
+                fa.name AS primary_focus_area
+            FROM workout_session_exercises wse
+            JOIN exercises e ON wse.exercise_id = e.id
+            LEFT JOIN focus_areas fa ON e.primary_focus_area_id = fa.id
+            WHERE wse.workout_session_id = $1
+            ORDER BY wse.order_in_workout
+            """,
+            active_session["id"],
+        )
+
+        final_list_session: List[Dict[str, Any]] = []
+        for r in session_rows:
+            ex_id = r["exercise_id"]
+            if ex_id in excluded_ids:
+                continue
+
+            base = base_by_id.get(ex_id)
+
+            if base:
+                name = base["name"]
+                description = base.get("description")
+                video_url = base.get("video_url")
+                primary_focus_area = base.get("primary_focus_area")
+                one_rm = base.get("one_rm_calculated", 0.0)
+                is_custom = base.get("is_custom", False)
+            else:
+                name = r["name"]
+                description = r["description"]
+                video_url = r["video_url"]
+                primary_focus_area = r["primary_focus_area"]
+                one_rm = 0.0
+                is_custom = False
+
+            weight_val = r["planned_weight_kg"]
+            reps_val = r["planned_reps"]
+            sets_val = r["planned_sets"]
+
+            item = {
+                "exercise_id": ex_id,
+                "name": name,
+                "description": description,
+                "video_url": video_url,
+                "primary_focus_area": primary_focus_area,
+                "weight_kg": float(weight_val) if weight_val is not None else (float(base["weight_kg"]) if base else 0.0),
+                "reps": int(reps_val) if reps_val is not None else (int(base["reps"]) if base else 12),
+                "sets": int(sets_val) if sets_val is not None else (int(base["sets"]) if base else 3),
+                "one_rm_calculated": float(one_rm),
+                "is_custom": is_custom,
+                "source": "session",
+                "order_in_workout": r["order_in_workout"],
+            }
+            final_list_session.append(item)
+
+        return {
+            "final": final_list_session,
+            "total_count": len(final_list_session),
+        }
 
     final_list: List[Dict[str, Any]] = []
 
@@ -1855,21 +2021,69 @@ async def add_exercises_to_active_workout(
     if not token_entry:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     user_id = token_entry['user_id']
+    # Check if the user has an active workout session
+    active_session = await conn.fetchrow(
+        """
+        SELECT id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+        FROM workout_sessions
+        WHERE user_id = $1 AND status = 'active'
+        """,
+        user_id,
+    )
 
-    async with conn.transaction():
-        # Ensure there is an active session
-        active_session = await conn.fetchrow(
-            """
-            SELECT id, user_id, status, started_at, completed_at, total_duration_seconds, notes
-            FROM workout_sessions
-            WHERE user_id = $1 AND status = 'active'
-            """,
-            user_id,
+    # If there is NO active session, treat this as adding exercises to the current plan
+    # by creating/updating custom exercises. These will appear in /user/me/generated-exercises
+    # when there is no active workout session.
+    if not active_session:
+        successful_exercises: List[CustomExerciseResponse] = []
+        failed_exercise_ids: List[int] = []
+
+        if not request_data.exercises:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No exercises provided")
+
+        for ex_payload in request_data.exercises:
+            ex_id = ex_payload.get('exercise_id')
+            if not ex_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="exercise_id is required for each item")
+
+            custom_exercise = await add_custom_exercise(conn, user_id, ex_id)
+            if custom_exercise:
+                exercise_response = CustomExerciseResponse(
+                    id=custom_exercise['id'],
+                    exercise_id=custom_exercise['exercise_id'],
+                    name=custom_exercise['name'],
+                    description=custom_exercise['description'],
+                    video_url=custom_exercise['video_url'],
+                    primary_focus_area=custom_exercise['primary_focus_area'],
+                    weight_kg=custom_exercise['weight_kg'],
+                    reps=custom_exercise['reps'],
+                    sets=custom_exercise['sets'],
+                    one_rm_calculated=custom_exercise['one_rm_calculated'],
+                    added_at=custom_exercise['added_at'],
+                )
+                successful_exercises.append(exercise_response)
+            else:
+                failed_exercise_ids.append(ex_id)
+
+        total_added = len(successful_exercises)
+        failed_count = len(failed_exercise_ids)
+
+        if total_added == 0 and failed_count > 0:
+            message = f"Failed to add any exercises to current plan. {failed_count} failed."
+        elif failed_count == 0:
+            message = f"{total_added} exercises added to current plan successfully"
+        else:
+            message = f"{total_added} exercises added to current plan successfully, {failed_count} failed"
+
+        return AddCustomExerciseResponse(
+            message=message,
+            exercises=successful_exercises,
+            total_added=total_added,
+            failed_exercises=failed_exercise_ids if failed_exercise_ids else None,
         )
 
-        if not active_session:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active workout session found")
-
+    # There is an active workout session: append exercises to that session
+    async with conn.transaction():
         # Get current max order to append after existing items
         current_max_order = await conn.fetchval(
             "SELECT COALESCE(MAX(order_in_workout), 0) FROM workout_session_exercises WHERE workout_session_id = $1",
@@ -1902,12 +2116,10 @@ async def add_exercises_to_active_workout(
             if not exercise_row:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Exercise with ID {ex_id} not found")
 
-            # Respect user's exclusions (forever + today)
+            # Respect user's permanent exclusions
             exclusion_check = await conn.fetchrow(
                 """
                 SELECT 1 FROM user_excluded_exercises_forever WHERE user_id = $1 AND exercise_id = $2
-                UNION
-                SELECT 1 FROM user_excluded_exercises_today WHERE user_id = $1 AND exercise_id = $2 AND excluded_date = CURRENT_DATE
                 """,
                 user_id,
                 ex_id,
