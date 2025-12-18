@@ -13,6 +13,7 @@ import jwt
 from app.helpers.token import get_access_token_from_header
 from fastapi import  Request
 import json
+from app.s3 import upload_profile_image, get_image_url, delete_image, get_presigned_image_url
 
 
 router = APIRouter()
@@ -35,7 +36,7 @@ async def create_user(
 
             # 2. Prepare user data, excluding all linked IDs for the main insert
             user_dict = user_data.model_dump(exclude={
-                'password', 'routine_id', 'motivation_ids', 'goal_ids', 'focus_area_ids', 
+                'password', 'routine_id', 'focus_area_ids', 
                 'health_issue_ids', 'equipment_ids', 'workout_days'
             })
             user_dict['password_hash'] = hashed_password
@@ -53,8 +54,6 @@ async def create_user(
             await db_queries.set_initial_active_routine(conn, new_user_id, user_data.routine_id)
 
             # 5. Perform efficient bulk inserts for other profile details
-            await db_queries.link_user_to_items(conn, new_user_id, user_data.motivation_ids, 'user_motivations', 'motivation_id')
-            await db_queries.link_user_to_items(conn, new_user_id, user_data.goal_ids, 'user_goals', 'goal_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.focus_area_ids, 'user_focus_areas', 'focus_area_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.health_issue_ids, 'user_health_issues', 'health_issue_id')
             await db_queries.link_user_to_items(conn, new_user_id, user_data.equipment_ids, 'user_equipment', 'equipment_id')
@@ -110,7 +109,7 @@ async def read_user(
 
     # The json_agg function in PostgreSQL returns a JSON string.
     # We need to parse these strings into Python lists/dicts before Pydantic validation.
-    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
+    for key in ['routines', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
         
@@ -124,6 +123,12 @@ async def read_user(
     user_dict['duration'] = user_dict.get('duration', 30)
     user_dict['rest_time'] = user_dict.get('rest_time', 30)
     user_dict['objective'] = user_dict.get('objective', 'muscle')
+    user_dict['reminder'] = user_dict.get('reminder', True)
+    user_dict['vibration_alert'] = user_dict.get('vibration_alert', True)
+
+    # Attach profile image URL if S3 key is present (use presigned URL for private bucket)
+    profile_key = user_dict.get('profile_image_key')
+    user_dict['profile_image_url'] = get_presigned_image_url(profile_key) if profile_key else None
 
     return user_dict
 
@@ -148,8 +153,9 @@ async def update_user_profile(
     # Update main user table fields
     main_fields = [
         "name", "gender", "age", "height_cm", "current_weight_kg", "target_weight_kg",
-        "fitness_level", "activity_level", "workouts_per_week", "is_matrix", "randomness",
-        "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
+        "fitness_level", "activity_level", "workouts_per_week", "motivation", "goal",
+        "reminder", "vibration_alert",
+        "is_matrix", "randomness", "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
     ]
     # Ensure randomness is int if present
     if 'randomness' in update_data and update_data['randomness'] is not None:
@@ -161,6 +167,34 @@ async def update_user_profile(
         query = f"UPDATE users SET {set_clause}, updated_at = NOW() WHERE id = $1"
         await conn.execute(query, user_id, *values)
 
+    # Handle profile image upload, if provided
+    profile_image_base64 = update_data.get("profile_image_base64")
+    if profile_image_base64:
+        # Fetch existing profile image key so we can delete the old image after successful upload
+        old_key = await conn.fetchval(
+            "SELECT profile_image_key FROM users WHERE id = $1",
+            user_id,
+        )
+
+        # Upload new profile image to S3
+        new_key = upload_profile_image(profile_image_base64, user_id)
+        if not new_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload profile image",
+            )
+
+        # Persist S3 key in users table
+        await conn.execute(
+            "UPDATE users SET profile_image_key = $2, updated_at = NOW() WHERE id = $1",
+            user_id,
+            new_key,
+        )
+
+        # Delete previous profile image from S3 (if any)
+        if old_key and old_key != new_key:
+            delete_image(old_key)
+
     # Handle many-to-many relationships (clear + insert new links)
     async def update_link_table(table, column, ids):
         if ids is not None:
@@ -168,8 +202,6 @@ async def update_user_profile(
             if ids:
                 await db_queries.link_user_to_items(conn, user_id, ids, table, column)
 
-    await update_link_table("user_motivations", "motivation_id", update_data.get("motivation_ids"))
-    await update_link_table("user_goals", "goal_id", update_data.get("goal_ids"))
     await update_link_table("user_equipment", "equipment_id", update_data.get("equipment_ids"))
     await update_link_table("user_health_issues", "health_issue_id", update_data.get("health_issue_ids"))
 
@@ -178,7 +210,7 @@ async def update_user_profile(
     if not row:
         raise HTTPException(status_code=404, detail="User not found after update")
     user_dict: Dict[str, Any] = dict(row)
-    for key in ['routines', 'motivations', 'goals', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
+    for key in ['routines', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
     # Ensure advanced profile fields are properly typed/defaulted
@@ -194,6 +226,13 @@ async def update_user_profile(
     user_dict['duration'] = user_dict.get('duration', 30)
     user_dict['rest_time'] = user_dict.get('rest_time', 30)
     user_dict['objective'] = user_dict.get('objective', 'muscle')
+    user_dict['reminder'] = user_dict.get('reminder', True)
+    user_dict['vibration_alert'] = user_dict.get('vibration_alert', True)
+
+    # Attach profile image URL if S3 key is present (use presigned URL for private bucket)
+    profile_key = user_dict.get('profile_image_key')
+    user_dict['profile_image_url'] = get_presigned_image_url(profile_key) if profile_key else None
+
     return user_dict
 
 

@@ -48,10 +48,10 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         INSERT INTO users (
             name, email, password_hash, gender, age, height_cm, 
             current_weight_kg, target_weight_kg, fitness_level, 
-            activity_level, workouts_per_week
+            activity_level, workouts_per_week, motivation, goal
         ) VALUES (
             $1, $2, $3, $4::gender_enum, $5, $6, $7, $8, 
-            $9::fitness_level_enum, $10::activity_level_enum, $11
+            $9::fitness_level_enum, $10::activity_level_enum, $11, $12, $13
         ) RETURNING id, created_at, updated_at;
     """
     return await conn.fetchrow(
@@ -66,7 +66,9 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         user_data['target_weight_kg'],
         user_data['fitness_level'], 
         user_data['activity_level'],
-        user_data['workouts_per_week']
+        user_data['workouts_per_week'],
+        user_data.get('motivation'),
+        user_data.get('goal')
     )
 
 # This function is correct and essential for the new flow.
@@ -184,16 +186,6 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         WHERE ur.user_id = $1
         GROUP BY ur.user_id
     ),
-    -- NEW: Pre-aggregate user goals into an array
-    user_goals_agg AS (
-        SELECT
-            ug.user_id,
-            json_agg(g.name ORDER BY g.name) AS goals
-        FROM user_goals ug
-        JOIN goals g ON g.id = ug.goal_id
-        WHERE ug.user_id = $1
-        GROUP BY ug.user_id
-    ),
     -- NEW: Pre-aggregate user equipment into an array
     user_equipment_agg AS (
         SELECT
@@ -212,16 +204,6 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         JOIN health_issues hi ON uhi.health_issue_id = hi.id
         WHERE uhi.user_id = $1
         GROUP BY uhi.user_id
-    ),
-    -- NEW: Pre-aggregate user motivations into an array
-    user_motivations_agg AS (
-        SELECT
-            um.user_id,
-            json_agg(m.name) as motivations
-        FROM user_motivations um
-        JOIN motivations m ON um.motivation_id = m.id
-        WHERE um.user_id = $1
-        GROUP BY um.user_id
     ),
     user_workout_days_agg AS (
         SELECT
@@ -261,22 +243,23 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         u.fitness_level,
         u.activity_level,
         u.workouts_per_week,
+        u.profile_image_key,
+        u.motivation,
+        u.goal,
+        u.reminder,
+        u.vibration_alert,
         COALESCE(uwda.workout_days, '[]'::json) AS workout_days,
-        -- Use COALESCE to gracefully handle users with no goals/equipment etc.
-        COALESCE(uga.goals, '[]'::json) AS goals,
+        -- Use COALESCE to gracefully handle users with no equipment etc.
         COALESCE(uea.equipment, '[]'::json) AS equipment,
         COALESCE(uh.health_issues, '[]'::json) AS health_issues,
         COALESCE(urd.routines, '[]'::json) AS routines,
-        COALESCE(uma.motivations, '[]'::json) as motivations,
         u.created_at,
         u.updated_at
     FROM users u
     -- Join our pre-aggregated CTEs
     LEFT JOIN user_routine_details urd ON u.id = urd.user_id
-    LEFT JOIN user_goals_agg uga ON u.id = uga.user_id
     LEFT JOIN user_equipment_agg uea ON u.id = uea.user_id
     LEFT JOIN user_health_issues_agg uh ON u.id = uh.user_id
-    LEFT JOIN user_motivations_agg uma ON u.id = uma.user_id
     LEFT JOIN user_workout_days_agg uwda ON u.id = uwda.user_id
     WHERE u.id = $1; -- Filter for the specific user
     """

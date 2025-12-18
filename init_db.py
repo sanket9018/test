@@ -204,6 +204,11 @@ def generate_schema_sql():
         unit_preference unit_preference_enum NOT NULL DEFAULT 'metric',
         timezone VARCHAR(100) DEFAULT 'UTC',
         last_login_at TIMESTAMP WITH TIME ZONE,
+        profile_image_key VARCHAR(255),
+        motivation VARCHAR(255),
+        goal VARCHAR(255),
+        reminder BOOLEAN DEFAULT TRUE,
+        vibration_alert BOOLEAN DEFAULT TRUE,
         
         is_matrix BOOLEAN DEFAULT FALSE,
         randomness INTEGER CHECK (randomness IN (10,20,30,40,50,60,70,80,90,100)) DEFAULT 10,
@@ -214,11 +219,6 @@ def generate_schema_sql():
         objective VARCHAR(50) DEFAULT 'muscle',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE user_motivations (
-        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        motivation_id INTEGER NOT NULL REFERENCES motivations(id) ON DELETE CASCADE,
-        PRIMARY KEY (user_id, motivation_id)
     );
 
     CREATE INDEX idx_users_email ON users(email);

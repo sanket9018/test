@@ -75,8 +75,8 @@ class UserOnboardingCreate(BaseModel):
     # Objective can be one of: muscle (maps to muscle_growth), strength, cardio
     objective: str = Field(...) 
     
-    motivation_ids: List[int]
-    goal_ids: List[int]
+    motivation: str
+    goal: str
     focus_area_ids: List[int]
     health_issue_ids: List[int]
     equipment_ids: List[int]
@@ -98,8 +98,8 @@ class UserOnboardingCreate(BaseModel):
                 "workouts_per_week": 3,
                 "routine_id": 1,  # User wants to start with "3 Day Classic"
                 "objective": "muscle",
-                "motivation_ids": [1, 2],
-                "goal_ids": [1, 3],
+                "motivation": "Health and Wellness",
+                "goal": "Build Muscle",
                 "focus_area_ids": [1, 2, 5],
                 "health_issue_ids": [1],
                 "equipment_ids": [5],
@@ -153,14 +153,17 @@ class UserDetailResponse(BaseModel):
     workout_days: List[DayOfWeekEnum]
     
     # Simple linked data
-    motivations: List[str]
-    goals: List[str]
+    motivation: Optional[str] = None
+    goal: Optional[str] = None
     equipment: List[str]
     health_issues: List[str]
     
     # The new, nested routine data
     routines: List[UserRoutineResponse]
     # New advanced user profile fields
+    profile_image_url: Optional[str] = None
+    reminder: bool = True
+    vibration_alert: bool = True
     is_matrix: bool
     randomness: int
     circute_training: bool
@@ -199,8 +202,10 @@ class UserProfileUpdate(BaseModel):
     fitness_level: Optional[FitnessLevelEnum] = None
     activity_level: Optional[ActivityLevelEnum] = None
     workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
-    motivation_ids: Optional[List[int]] = None
-    goal_ids: Optional[List[int]] = None
+    motivation: Optional[str] = None
+    goal: Optional[str] = None
+    reminder: Optional[bool] = None
+    vibration_alert: Optional[bool] = None
     equipment_ids: Optional[List[int]] = None
     health_issue_ids: Optional[List[int]] = None
     is_matrix: Optional[bool] = None
@@ -210,6 +215,10 @@ class UserProfileUpdate(BaseModel):
     duration: Optional[int] = None
     rest_time: Optional[int] = None
     objective: Optional[str] = Field(None)
+    profile_image_base64: Optional[str] = Field(
+        None,
+        description="Base64-encoded image data for the user's profile picture",
+    )
 
 class WorkoutGenerationRequest(BaseSchema):
     workout_days: List[DayOfWeekEnum] = Field(..., min_items=1, max_items=7)
