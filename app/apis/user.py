@@ -2005,6 +2005,9 @@ async def get_alternative_exercises(
     # Format alternative exercises
     alternatives = []
     for alt in alternatives_data:
+        # Extra safety: ensure the original exercise is never included in alternatives
+        if int(alt['id']) == int(request_data.exercise_id):
+            continue
         alternatives.append(AlternativeExerciseResponse(
             id=alt['id'],
             name=alt['name'],
