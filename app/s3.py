@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 import logging
 
 logger = logging.getLogger(__name__)
+from botocore.config import Config
 
 class S3Manager:
     def __init__(self):

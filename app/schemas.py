@@ -53,7 +53,7 @@ class UserCreate(UserBase):
     fitness_level: FitnessLevelEnum = FitnessLevelEnum.beginner
     activity_level: ActivityLevelEnum = ActivityLevelEnum.moderately_active
     workouts_per_week: int = Field(3, ge=1, le=7)
-    motivation_ids: Optional[List[int]] = None
+    motivation_id: Optional[List[int]] = None
 
 class UserOnboardingCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
@@ -75,12 +75,38 @@ class UserOnboardingCreate(BaseModel):
     # Objective can be one of: muscle (maps to muscle_growth), strength, cardio
     objective: str = Field(...) 
     
-    motivation: str
-    goal: str
+    motivations: List[str]
+    goals: List[str]
     focus_area_ids: List[int]
     health_issue_ids: List[int]
     equipment_ids: List[int]
     workout_days: List[str]
+
+    @validator('activity_level', pre=True)
+    def normalize_activity_level(cls, v):
+        if isinstance(v, str):
+            mapping = {
+                "light active": "lightly_active",
+                "moderately active": "moderately_active",
+                "very active": "very_active",
+                "sedentary": "sedentary"
+            }
+            # Normalize: strip and lowercase, then check map
+            norm = v.strip().lower()
+            if norm in mapping:
+                return mapping[norm]
+            # Also try replacing space with underscore directly
+            return norm.replace(" ", "_")
+        return v
+
+    @validator('fitness_level', pre=True)
+    def normalize_fitness_level(cls, v):
+        if isinstance(v, str):
+            norm = v.strip().lower()
+            # Ensure it matches one of the allowed values or simple mapping if needed
+            # "intermediate" is fine, but just in case
+            return norm.replace(" ", "_")
+        return v
 
     class Config:
         json_schema_extra = {
@@ -98,8 +124,9 @@ class UserOnboardingCreate(BaseModel):
                 "workouts_per_week": 3,
                 "routine_id": 1,  # User wants to start with "3 Day Classic"
                 "objective": "muscle",
-                "motivation": "Health and Wellness",
-                "goal": "Build Muscle",
+                "objective": "muscle",
+                "motivations": ["Health and Wellness"],
+                "goals": ["Build Muscle"],
                 "focus_area_ids": [1, 2, 5],
                 "health_issue_ids": [1],
                 "equipment_ids": [5],
@@ -151,10 +178,11 @@ class UserDetailResponse(BaseModel):
     activity_level: str
     workouts_per_week: int
     workout_days: List[DayOfWeekEnum]
+    days: List[str]
     
     # Simple linked data
-    motivation: Optional[str] = None
-    goal: Optional[str] = None
+    motivations: Optional[List[str]] = None
+    goals: Optional[List[str]] = None
     equipment: List[str]
     health_issues: List[str]
     
@@ -202,8 +230,8 @@ class UserProfileUpdate(BaseModel):
     fitness_level: Optional[FitnessLevelEnum] = None
     activity_level: Optional[ActivityLevelEnum] = None
     workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
-    motivation: Optional[str] = None
-    goal: Optional[str] = None
+    motivations: Optional[List[str]] = None
+    goals: Optional[List[str]] = None
     reminder: Optional[bool] = None
     vibration_alert: Optional[bool] = None
     equipment_ids: Optional[List[int]] = None
@@ -716,12 +744,24 @@ class WorkoutStatusResponse(BaseModel):
     total_sets_logged: Optional[int] = None
     total_duration_seconds_so_far: Optional[int] = None
 
+class ExerciseSetDetail(BaseModel):
+    """Detailed information about a single set for an exercise in workout history."""
+    set_number: int
+    weight_kg: float
+    reps_completed: int
+    duration_seconds: Optional[int] = None
+    rest_time_seconds: Optional[int] = None
+
+
 class ExerciseSummary(BaseModel):
     """Summary of an exercise in workout history."""
     exercise_id: int
     exercise_name: str
     total_sets: int
     sets_summary: str  # e.g., "4 sets × 10 reps at 9kg"
+    video_url: Optional[str] = None
+    image_url: Optional[str] = None
+    sets: List[ExerciseSetDetail] = []
     
 class WorkoutSessionSummary(BaseModel):
     """Summary of a workout session."""

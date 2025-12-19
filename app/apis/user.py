@@ -37,9 +37,15 @@ async def create_user(
             # 2. Prepare user data, excluding all linked IDs for the main insert
             user_dict = user_data.model_dump(exclude={
                 'password', 'routine_id', 'focus_area_ids', 
-                'health_issue_ids', 'equipment_ids', 'workout_days'
+                'health_issue_ids', 'equipment_ids', 'workout_days',
+                'motivations', 'goals'
             })
             user_dict['password_hash'] = hashed_password
+            
+            # Serialize lists to JSON strings for DB storage
+            user_dict['motivation'] = json.dumps(user_data.motivations) if user_data.motivations else None
+            user_dict['goal'] = json.dumps(user_data.goals) if user_data.goals else None
+            user_dict['days'] = json.dumps(user_data.workout_days) if user_data.workout_days else None
 
             # 3. Insert the main user record.
             # The DB trigger 'trigger_assign_routines_on_user_insert' will fire here
@@ -112,6 +118,33 @@ async def read_user(
     for key in ['routines', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
+
+    # Parse motivation and goal from JSON strings to lists
+    if user_dict.get('motivation') and isinstance(user_dict.get('motivation'), str):
+        try:
+            user_dict['motivations'] = json.loads(user_dict['motivation'])
+        except json.JSONDecodeError:
+             user_dict['motivations'] = [user_dict['motivation']] # Fallback for old simple strings
+    else:
+        user_dict['motivations'] = []
+
+    if user_dict.get('goal') and isinstance(user_dict.get('goal'), str):
+        try:
+             user_dict['goals'] = json.loads(user_dict['goal'])
+        except json.JSONDecodeError:
+             user_dict['goals'] = [user_dict['goal']] # Fallback
+    else:
+        user_dict['goals'] = []
+
+    # Parse days JSON string (stored in users.days) into a list of strings
+    if user_dict.get('days') and isinstance(user_dict.get('days'), str):
+        try:
+            user_dict['days'] = json.loads(user_dict['days'])
+        except json.JSONDecodeError:
+            user_dict['days'] = [user_dict['days']]
+    else:
+        user_dict['days'] = []
+
         
     # Convert decimal/decimal-like numeric types to float for JSON serialization
 
@@ -153,13 +186,28 @@ async def update_user_profile(
     # Update main user table fields
     main_fields = [
         "name", "gender", "age", "height_cm", "current_weight_kg", "target_weight_kg",
-        "fitness_level", "activity_level", "workouts_per_week", "motivation", "goal",
+        "fitness_level", "activity_level", "workouts_per_week", 
         "reminder", "vibration_alert",
         "is_matrix", "randomness", "circute_training", "rapge_ranges", "duration", "rest_time", "objective"
     ]
     # Ensure randomness is int if present
     if 'randomness' in update_data and update_data['randomness'] is not None:
         update_data['randomness'] = int(update_data['randomness'])
+
+    # Handle special fields (motivations, goals) -> map to DB columns motivation, goal
+    if 'motivations' in update_data:
+        update_data['motivation'] = json.dumps(update_data['motivations'])
+        main_fields.append('motivation')
+    
+    if 'goals' in update_data:
+        update_data['goal'] = json.dumps(update_data['goals'])
+        main_fields.append('goal')
+
+    # Handle days list -> map to DB column days
+    if 'days' in update_data:
+        update_data['days'] = json.dumps(update_data['days'])
+        main_fields.append('days')
+
     main_update = {k: v for k, v in update_data.items() if k in main_fields}
     if main_update:
         set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(main_update.keys())])
@@ -213,6 +261,34 @@ async def update_user_profile(
     for key in ['routines', 'equipment', 'health_issues', 'focus_areas', 'workout_days']:
         if key in user_dict and isinstance(user_dict.get(key), str):
             user_dict[key] = json.loads(user_dict[key])
+    
+    # Check if motivation and goal are present in user_dict, otherwise fallback to defaults or empty list
+    # The DB query returns 'motivation' and 'goal' columns.
+    if user_dict.get('motivation') and isinstance(user_dict.get('motivation'), str):
+        try:
+            user_dict['motivations'] = json.loads(user_dict['motivation'])
+        except json.JSONDecodeError:
+             user_dict['motivations'] = [user_dict['motivation']]
+    else:
+        user_dict['motivations'] = []
+
+    if user_dict.get('goal') and isinstance(user_dict.get('goal'), str):
+        try:
+             user_dict['goals'] = json.loads(user_dict['goal'])
+        except json.JSONDecodeError:
+             user_dict['goals'] = [user_dict['goal']]
+    else:
+        user_dict['goals'] = []
+
+    # Parse days JSON string (stored in users.days) into a list of strings
+    if user_dict.get('days') and isinstance(user_dict.get('days'), str):
+        try:
+            user_dict['days'] = json.loads(user_dict['days'])
+        except json.JSONDecodeError:
+            user_dict['days'] = [user_dict['days']]
+    else:
+        user_dict['days'] = []
+
     # Ensure advanced profile fields are properly typed/defaulted
     user_dict['is_matrix'] = user_dict.get('is_matrix', False)
     # Ensure randomness is always an int and never None for response model
@@ -2836,6 +2912,8 @@ async def get_workout_history(
                 SELECT 
                     e.id as exercise_id,
                     e.name as exercise_name,
+                    e.video_url,
+                    e.image_url,
                     COUNT(wl.id) as total_sets,
                     ROUND(AVG(wl.weight_kg), 1) as avg_weight,
                     ROUND(AVG(wl.reps_completed), 0) as avg_reps
@@ -2843,9 +2921,38 @@ async def get_workout_history(
                 JOIN exercises e ON wse.exercise_id = e.id
                 LEFT JOIN workout_logs wl ON wse.id = wl.workout_session_exercise_id
                 WHERE wse.workout_session_id = $1
-                GROUP BY e.id, e.name
+                GROUP BY e.id, e.name, e.video_url, e.image_url
                 ORDER BY MIN(wse.order_in_workout)
             """, session['workout_session_id'])
+            
+            # Get detailed set logs for this session and group them by exercise
+            logs_data = await conn.fetch("""
+                SELECT
+                    wl.exercise_id,
+                    wl.set_number,
+                    wl.weight_kg,
+                    wl.reps_completed,
+                    wl.duration_seconds,
+                    wl.rest_time_seconds
+                FROM workout_logs wl
+                WHERE wl.workout_session_id = $1
+                ORDER BY wl.exercise_id, wl.set_number
+            """, session['workout_session_id'])
+
+            logs_by_exercise: Dict[int, List[ExerciseSetDetail]] = {}
+            for log in logs_data:
+                exercise_id = log['exercise_id']
+                if exercise_id not in logs_by_exercise:
+                    logs_by_exercise[exercise_id] = []
+                logs_by_exercise[exercise_id].append(
+                    ExerciseSetDetail(
+                        set_number=log['set_number'],
+                        weight_kg=float(log['weight_kg']) if log['weight_kg'] is not None else 0.0,
+                        reps_completed=log['reps_completed'],
+                        duration_seconds=log['duration_seconds'],
+                        rest_time_seconds=log['rest_time_seconds'],
+                    )
+                )
             
             exercises = []
             for ex in exercises_data:
@@ -2859,7 +2966,10 @@ async def get_workout_history(
                     exercise_id=ex['exercise_id'],
                     exercise_name=ex['exercise_name'],
                     total_sets=ex['total_sets'],
-                    sets_summary=sets_summary
+                    sets_summary=sets_summary,
+                    video_url=ex['video_url'],
+                    image_url=ex['image_url'],
+                    sets=logs_by_exercise.get(ex['exercise_id'], [])
                 ))
             
             workout_sessions.append(WorkoutSessionSummary(

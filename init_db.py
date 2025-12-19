@@ -207,6 +207,7 @@ def generate_schema_sql():
         profile_image_key VARCHAR(255),
         motivation VARCHAR(255),
         goal VARCHAR(255),
+        days TEXT,
         reminder BOOLEAN DEFAULT TRUE,
         vibration_alert BOOLEAN DEFAULT TRUE,
         

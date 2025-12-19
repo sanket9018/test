@@ -48,10 +48,10 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         INSERT INTO users (
             name, email, password_hash, gender, age, height_cm, 
             current_weight_kg, target_weight_kg, fitness_level, 
-            activity_level, workouts_per_week, motivation, goal
+            activity_level, workouts_per_week, motivation, goal, days
         ) VALUES (
             $1, $2, $3, $4::gender_enum, $5, $6, $7, $8, 
-            $9::fitness_level_enum, $10::activity_level_enum, $11, $12, $13
+            $9::fitness_level_enum, $10::activity_level_enum, $11, $12, $13, $14
         ) RETURNING id, created_at, updated_at;
     """
     return await conn.fetchrow(
@@ -68,7 +68,8 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         user_data['activity_level'],
         user_data['workouts_per_week'],
         user_data.get('motivation'),
-        user_data.get('goal')
+        user_data.get('goal'),
+        user_data.get('days')
     )
 
 # This function is correct and essential for the new flow.
@@ -246,6 +247,7 @@ async def fetch_user_with_routines(conn: asyncpg.Connection, user_id: int) -> Op
         u.profile_image_key,
         u.motivation,
         u.goal,
+        u.days,
         u.reminder,
         u.vibration_alert,
         COALESCE(uwda.workout_days, '[]'::json) AS workout_days,
