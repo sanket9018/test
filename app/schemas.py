@@ -634,6 +634,9 @@ class StartWorkoutRequest(BaseModel):
             }
         }
 
+class RepeatWorkoutRequest(BaseModel):
+    workout_session_id: int = Field(..., gt=0, description="ID of the workout session to repeat")
+
 class WorkoutSessionResponse(BaseModel):
     """Response model for workout session."""
     id: int

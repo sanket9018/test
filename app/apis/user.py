@@ -2141,6 +2141,156 @@ async def start_workout(
         )
 
 
+@router.post("/user/workout/repeat")
+async def repeat_workout(
+    request_data: RepeatWorkoutRequest,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """Start a new workout session by repeating a past completed workout session."""
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    async with conn.transaction():
+        # Ensure there is no active workout session
+        existing_session = await conn.fetchrow(
+            """
+            SELECT id, started_at 
+            FROM workout_sessions 
+            WHERE user_id = $1 AND status = 'active'
+            """,
+            user_id,
+        )
+
+        if existing_session:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You already have an active workout session started at {existing_session['started_at']}"
+            )
+
+        # Validate the source (completed) workout session
+        source_session = await conn.fetchrow(
+            """
+            SELECT id
+            FROM workout_sessions
+            WHERE id = $1 AND user_id = $2 AND status = 'completed'
+            """,
+            request_data.workout_session_id,
+            user_id,
+        )
+
+        if not source_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workout session not found or not completed for this user"
+            )
+
+        # Fetch exercises from the source session
+        source_exercises = await conn.fetch(
+            """
+            SELECT 
+                wse.exercise_id,
+                wse.planned_sets,
+                wse.planned_reps,
+                wse.planned_weight_kg,
+                wse.order_in_workout,
+                e.name AS exercise_name
+            FROM workout_session_exercises wse
+            JOIN exercises e ON wse.exercise_id = e.id
+            WHERE wse.workout_session_id = $1
+            ORDER BY wse.order_in_workout
+            """,
+            source_session['id'],
+        )
+
+        if not source_exercises:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot repeat this workout because it has no exercises"
+            )
+
+        # Respect user's permanent exclusions when repeating
+        excluded_rows = await conn.fetch(
+            """
+            SELECT exercise_id
+            FROM user_excluded_exercises_forever
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+        excluded_ids = {r['exercise_id'] for r in excluded_rows}
+
+        repeatable_exercises = [ex for ex in source_exercises if ex['exercise_id'] not in excluded_ids]
+
+        if not repeatable_exercises:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot repeat this workout because all exercises are currently excluded"
+            )
+
+        # Create new active workout session
+        new_session = await conn.fetchrow(
+            """
+            INSERT INTO workout_sessions (user_id, status)
+            VALUES ($1, 'active')
+            RETURNING id, user_id, status, started_at, completed_at, total_duration_seconds, notes
+            """,
+            user_id,
+        )
+
+        # Insert exercises into the new session
+        exercises: List[WorkoutSessionExerciseResponse] = []
+        for ex in repeatable_exercises:
+            session_exercise = await conn.fetchrow(
+                """
+                INSERT INTO workout_session_exercises 
+                (workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, workout_session_id, exercise_id, planned_sets, planned_reps, planned_weight_kg, order_in_workout, is_completed, created_at
+                """,
+                new_session['id'],
+                ex['exercise_id'],
+                ex['planned_sets'],
+                ex['planned_reps'],
+                ex['planned_weight_kg'],
+                ex['order_in_workout'],
+            )
+
+            exercises.append(
+                WorkoutSessionExerciseResponse(
+                    id=session_exercise['id'],
+                    workout_session_id=session_exercise['workout_session_id'],
+                    exercise_id=session_exercise['exercise_id'],
+                    exercise_name=ex['exercise_name'],
+                    planned_sets=session_exercise['planned_sets'],
+                    planned_reps=session_exercise['planned_reps'],
+                    planned_weight_kg=session_exercise['planned_weight_kg'],
+                    order_in_workout=session_exercise['order_in_workout'],
+                    is_completed=session_exercise['is_completed'],
+                    created_at=session_exercise['created_at'],
+                )
+            )
+
+        session_response = WorkoutSessionResponse(
+            id=new_session['id'],
+            user_id=new_session['user_id'],
+            status=WorkoutStatusEnum(new_session['status']),
+            started_at=new_session['started_at'],
+            completed_at=new_session['completed_at'],
+            total_duration_seconds=new_session['total_duration_seconds'],
+            notes=new_session['notes'],
+        )
+
+        return StartWorkoutResponse(
+            message=f"Workout session repeated successfully with {len(exercises)} exercises",
+            workout_session=session_response,
+            exercises=exercises,
+        )
+
+
 @router.post("/user/workout/add-exercises")
 async def add_exercises_to_active_workout(
     request_data: StartWorkoutRequest,
