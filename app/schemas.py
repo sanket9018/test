@@ -232,6 +232,7 @@ class UserProfileUpdate(BaseModel):
     workouts_per_week: Optional[int] = Field(None, ge=1, le=7)
     motivations: Optional[List[str]] = None
     goals: Optional[List[str]] = None
+    days: Optional[List[str]] = None
     reminder: Optional[bool] = None
     vibration_alert: Optional[bool] = None
     equipment_ids: Optional[List[int]] = None
