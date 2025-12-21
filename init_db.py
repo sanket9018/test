@@ -144,7 +144,7 @@ def generate_schema_sql():
     -- ========= ENUMERATED TYPES (Unchanged) =========
     CREATE TYPE gender_enum AS ENUM ('male', 'female', 'other', 'prefer_not_to_say');
     CREATE TYPE fitness_level_enum AS ENUM ('beginner', 'intermediate', 'advanced');
-    CREATE TYPE activity_level_enum AS ENUM ('sedentary', 'lightly_active', 'moderately_active', 'very_active');
+    CREATE TYPE activity_level_enum AS ENUM ('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active');
     CREATE TYPE day_of_week_enum AS ENUM ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday');
     CREATE TYPE user_status_enum AS ENUM ('active', 'pending_verification', 'suspended', 'deleted');
     CREATE TYPE unit_preference_enum AS ENUM ('metric', 'imperial');

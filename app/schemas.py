@@ -20,6 +20,7 @@ class ActivityLevelEnum(str, Enum):
     lightly_active = "lightly_active"
     moderately_active = "moderately_active"
     very_active = "very_active"
+    extra_active = "extra_active"
 
 class DayOfWeekEnum(str, Enum):
     monday = "monday"
@@ -88,8 +89,10 @@ class UserOnboardingCreate(BaseModel):
             mapping = {
                 "light active": "lightly_active",
                 "moderately active": "moderately_active",
+                "moderate active": "moderately_active",
                 "very active": "very_active",
-                "sedentary": "sedentary"
+                "sedentary": "sedentary",
+                "extra active": "extra_active"
             }
             # Normalize: strip and lowercase, then check map
             norm = v.strip().lower()

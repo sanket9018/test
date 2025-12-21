@@ -1831,8 +1831,10 @@ async def get_combined_exercises(
         )
 
         final_list_session: List[Dict[str, Any]] = []
+        session_exercise_ids: set[int] = set()
         for r in session_rows:
             ex_id = r["exercise_id"]
+            session_exercise_ids.add(ex_id)
             if ex_id in excluded_ids:
                 continue
 
@@ -1872,6 +1874,17 @@ async def get_combined_exercises(
                 "order_in_workout": r["order_in_workout"],
             }
             final_list_session.append(item)
+
+        # Alt are noso include any custom exercises that part of the active session.
+        # This ensures that custom exercises added before or during a workout
+        # remain visible in the unified list until a new generation or explicit
+        # clear operation, as requested.
+        for r in custom_rows:
+            ex_id = r["exercise_id"]
+            if ex_id in session_exercise_ids or ex_id in excluded_ids:
+                continue
+            extra = map_from_custom(r)
+            final_list_session.append(extra)
 
         return {
             "final": final_list_session,
