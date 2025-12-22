@@ -17,8 +17,8 @@ class FitnessLevelEnum(str, Enum):
 
 class ActivityLevelEnum(str, Enum):
     sedentary = "sedentary"
-    lightly_active = "lightly_active"
-    moderately_active = "moderately_active"
+    light_active = "light_active"
+    moderate_active = "moderate_active"
     very_active = "very_active"
     extra_active = "extra_active"
 
@@ -52,7 +52,7 @@ class UserCreate(UserBase):
     current_weight_kg: Optional[float] = Field(None, gt=0, le=1000)
     target_weight_kg: Optional[float] = Field(None, gt=0, le=1000)
     fitness_level: FitnessLevelEnum = FitnessLevelEnum.beginner
-    activity_level: ActivityLevelEnum = ActivityLevelEnum.moderately_active
+    activity_level: ActivityLevelEnum = ActivityLevelEnum.moderate_active
     workouts_per_week: int = Field(3, ge=1, le=7)
     motivation_id: Optional[List[int]] = None
 
@@ -87,12 +87,16 @@ class UserOnboardingCreate(BaseModel):
     def normalize_activity_level(cls, v):
         if isinstance(v, str):
             mapping = {
-                "light active": "lightly_active",
-                "moderately active": "moderately_active",
-                "moderate active": "moderately_active",
+                # Human-friendly inputs mapped to canonical enum values
+                "light active": "light_active",
+                "moderately active": "moderate_active",
+                "moderate active": "moderate_active",
                 "very active": "very_active",
                 "sedentary": "sedentary",
-                "extra active": "extra_active"
+                "extra active": "extra_active",
+                # Backward-compatible support for old stored values
+                "lightly_active": "light_active",
+                "moderately_active": "moderate_active",
             }
             # Normalize: strip and lowercase, then check map
             norm = v.strip().lower()
@@ -123,7 +127,7 @@ class UserOnboardingCreate(BaseModel):
                 "current_weight_kg": 65.0,
                 "target_weight_kg": 60.0,
                 "fitness_level": "beginner",
-                "activity_level": "lightly_active",
+                "activity_level": "light_active",
                 "workouts_per_week": 3,
                 "routine_id": 1,  # User wants to start with "3 Day Classic"
                 "objective": "muscle",
@@ -610,9 +614,17 @@ class WorkoutStatusEnum(str, Enum):
     completed = "completed"
     cancelled = "cancelled"
 
+class ActivityLevelEnum(str, Enum):
+    sedentary = "sedentary"
+    light_active = "light_active"
+    moderate_active = "moderate_active"
+    very_active = "very_active"
+    extremely_active = "extremely_active"
+
 class StartWorkoutRequest(BaseModel):
     """Request model for starting a workout session."""
     exercises: List[Dict[str, Any]] = Field(..., description="List of exercises with their planned sets, reps, and weights")
+    activity_level: ActivityLevelEnum = Field(ActivityLevelEnum.light_active, description="User's activity level")
     
     class Config:
         json_schema_extra = {
