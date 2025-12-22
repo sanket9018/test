@@ -271,7 +271,7 @@ class User(UserBase):
     current_weight_kg: Optional[float] = None
     target_weight_kg: Optional[float] = None
     fitness_level: FitnessLevelEnum = FitnessLevelEnum.beginner
-    activity_level: ActivityLevelEnum = ActivityLevelEnum.moderately_active
+    activity_level: ActivityLevelEnum = ActivityLevelEnum.moderate_active
     workouts_per_week: int = 3
     motivation_ids: Optional[List[int]] = None
     created_at: datetime
