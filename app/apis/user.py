@@ -683,57 +683,63 @@ async def generate_workout_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No suitable exercises found for today's workout."
         )
-    
-    # Calculate how many exercises to return
+
+    # Calculate how many exercises we can actually return (cannot exceed available)
     exercises_to_return = min(TOTAL_EXERCISES_WANTED, total_available)
-    
-    # Ensure at least 1-2 exercises per focus area are included
+
+    # Group exercises by their primary focus area
     focus_area_exercises = {}
     for exercise in all_suitable_exercises:
-        # Group exercises by their primary focus area (assuming it's in the exercise data)
         primary_focus = exercise.get('primary_focus_area', 'Unknown')
         if primary_focus not in focus_area_exercises:
             focus_area_exercises[primary_focus] = []
         focus_area_exercises[primary_focus].append(exercise)
-    
-    # Guarantee at least 1 exercise per focus area
+
+    focus_area_names = list(focus_area_exercises.keys())
+    num_focus_areas = len(focus_area_names)
+
+    # Distribute guaranteed slots across focus areas as evenly as possible
     guaranteed_exercises = []
-    for focus_area, exercises in focus_area_exercises.items():
-        if exercises:
-            # Take the first exercise (already sorted by ID) for consistency
-            guaranteed_exercises.append(exercises[0])
-            # Add a second one if we have enough total exercises wanted
-            if len(exercises) > 1 and len(guaranteed_exercises) < TOTAL_EXERCISES_WANTED:
-                guaranteed_exercises.append(exercises[1])
-    
+    if num_focus_areas > 0 and exercises_to_return >= num_focus_areas:
+        base_per_focus = exercises_to_return // num_focus_areas
+        extra_slots = exercises_to_return % num_focus_areas
+
+        for idx, focus_area in enumerate(focus_area_names):
+            candidates = focus_area_exercises[focus_area]
+            desired_count = base_per_focus + (1 if idx < extra_slots else 0)
+            if desired_count <= 0:
+                continue
+            # Take up to desired_count candidates for this focus area
+            guaranteed_exercises.extend(candidates[:desired_count])
+
     # Remove guaranteed exercises from the main pool
     guaranteed_ids = {ex['id'] for ex in guaranteed_exercises}
     remaining_pool = [ex for ex in all_suitable_exercises if ex['id'] not in guaranteed_ids]
-    
-    # Calculate how many more exercises we need
-    remaining_needed = TOTAL_EXERCISES_WANTED - len(guaranteed_exercises)
-    
+
+    # Calculate how many more exercises we need to hit the target count
+    remaining_needed = exercises_to_return - len(guaranteed_exercises)
+
     print(f"Duration: {duration}min, Exercises wanted: {TOTAL_EXERCISES_WANTED}, Randomness: {randomness}%, Available: {total_available}, Focus areas: {len(p_focus_area_ids)}")
     print(f"Guaranteed per focus area: {len(guaranteed_exercises)}, Remaining needed: {remaining_needed}")
-    
+
     if remaining_needed > 0 and remaining_pool:
         # Apply randomness to the remaining pool
         fixed_from_remaining = math.ceil(remaining_needed * (100 - randomness) / 100)
         random_from_remaining = remaining_needed - fixed_from_remaining
-        
+
         # Fixed exercises (deterministic, already sorted by ID)
         fixed_exercises = remaining_pool[:fixed_from_remaining]
-        
+
         # Random exercises from remaining pool
         random_pool = remaining_pool[fixed_from_remaining:]
         random.shuffle(random_pool)
         random_exercises = random_pool[:random_from_remaining]
-        
+
         # Combine all exercises
         final_exercises = guaranteed_exercises + fixed_exercises + random_exercises
     else:
-        final_exercises = guaranteed_exercises[:TOTAL_EXERCISES_WANTED]
-    
+        final_exercises = guaranteed_exercises[:exercises_to_return]
+
     # Final shuffle for better UX while maintaining focus area coverage
     random.shuffle(final_exercises)
     

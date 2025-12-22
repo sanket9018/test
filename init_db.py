@@ -726,13 +726,20 @@ def generate_dynamic_exercises_sql(valid_equipment_names: set):
 
         ex_desc = sql_escape(ex.get('desc', ''))
 
+        # Prefer Muscle Growth over Strength Training when both are present,
+        # so hypertrophy-focused exercises are available for the 'muscle' objective.
         type_mapping = {"Strength Training": "strength", "Muscle Growth": "muscle_growth", "Calorie Burning": "cardio"}
         json_types = ex.get('type', [])
+
+        # Default to strength but override if Muscle Growth is explicitly present.
         ex_type = 'strength'
-        for t in json_types:
-            if t in type_mapping:
-                ex_type = type_mapping[t]
-                break
+        if "Muscle Growth" in json_types:
+            ex_type = type_mapping["Muscle Growth"]
+        else:
+            for t in json_types:
+                if t in type_mapping:
+                    ex_type = type_mapping[t]
+                    break
 
         ex_impact = ex.get('is_high_impact', False)
         primary_focus_area_name = sql_escape(ex['focus_areas'][0]) if ex.get('focus_areas') else 'Full Body'
