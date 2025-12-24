@@ -161,7 +161,7 @@ async def read_user(
     user_dict['circute_training'] = user_dict.get('circute_training', False)
     user_dict['rapge_ranges'] = user_dict.get('rapge_ranges', False)
     user_dict['duration'] = user_dict.get('duration', 30)
-    user_dict['rest_time'] = user_dict.get('rest_time', 30)
+    user_dict['rest_time'] = user_dict.get('rest_time', 1)
     user_dict['objective'] = user_dict.get('objective', 'muscle')
     user_dict['reminder'] = user_dict.get('reminder', True)
     user_dict['vibration_alert'] = user_dict.get('vibration_alert', True)
@@ -926,6 +926,18 @@ async def get_all_exercises(
                             id=focus_area['id'],
                             name=focus_area['name']
                         ))
+
+            # Parse muscle_groups JSON (stored as TEXT)
+            muscle_groups = None
+            mg_raw = record.get('muscle_groups')
+            if mg_raw:
+                if isinstance(mg_raw, str):
+                    try:
+                        muscle_groups = json.loads(mg_raw)
+                    except Exception:
+                        muscle_groups = None
+                elif isinstance(mg_raw, dict):
+                    muscle_groups = mg_raw
             
             exercises.append(ExerciseItem(
                 id=record['id'],
@@ -933,6 +945,8 @@ async def get_all_exercises(
                 description=record.get('description'),
                 video_url=build_exercise_video_url(record.get('video_url')),
                 image_url=build_exercise_image_url(record.get('image_url')),
+                pro_tip=record.get('pro_tip'),
+                muscle_groups=muscle_groups,
                 focus_areas=focus_areas,
             ))
         
@@ -1765,6 +1779,19 @@ async def get_combined_exercises(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     user_id = token_entry['user_id']
 
+    # Helper to parse muscle_groups JSON stored as TEXT in DB
+    def parse_muscle_groups(value: Any) -> Optional[Dict[str, Any]]:
+        if not value:
+            return None
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return None
+        if isinstance(value, dict):
+            return value
+        return None
+
     # Exclusions (forever + today)
     excluded_rows = await conn.fetch(
         """
@@ -1784,6 +1811,65 @@ async def get_combined_exercises(
     custom_rows = await get_user_custom_exercises(conn, user_id)
     custom_rows = [r for r in custom_rows if r["exercise_id"] not in excluded_ids]
 
+    # Determine primary_focus_area for generated exercises using the same logic
+    # as /generate, so labels stay consistent (e.g. "Abs" instead of static DB "Legs").
+    primary_focus_by_exercise: Dict[int, str] = {}
+    if gen_rows:
+        try:
+            user_data = await db_queries.get_profile_for_workout_generation(conn, user_id)
+            if user_data and user_data.get("exercise_mode") == "focus_areas":
+                focus_area_ids = user_data["focus_area_ids"] or []
+                if focus_area_ids:
+                    # Rebuild the same parameters used in /generate
+                    bodyweight_id = await db_queries.get_equipment_id_by_name(conn, "Bodyweight")
+                    equipment_ids = set(user_data["equipment_ids"] or [])
+                    if bodyweight_id:
+                        equipment_ids.add(bodyweight_id)
+
+                    p_focus_area_ids = focus_area_ids or [0]
+                    p_equipment_ids = list(equipment_ids) or [0]
+                    p_health_issue_ids = user_data["health_issue_ids"] or [0]
+
+                    duration = user_data.get("duration", 30)
+                    if duration <= 10:
+                        TOTAL_EXERCISES_WANTED = 2
+                    elif duration <= 20:
+                        TOTAL_EXERCISES_WANTED = 3
+                    elif duration <= 30:
+                        TOTAL_EXERCISES_WANTED = 4
+                    elif duration <= 40:
+                        TOTAL_EXERCISES_WANTED = 5
+                    elif duration <= 50:
+                        TOTAL_EXERCISES_WANTED = 6
+                    elif duration <= 60:
+                        TOTAL_EXERCISES_WANTED = 7
+                    else:
+                        TOTAL_EXERCISES_WANTED = 8 + ((duration - 60) // 10)
+
+                    min_exercises_per_focus = min(2, TOTAL_EXERCISES_WANTED // len(p_focus_area_ids))
+                    exercises_per_focus = max(min_exercises_per_focus, 30 // len(p_focus_area_ids))
+
+                    user_objective = user_data.get("objective", "muscle")
+                    exercise_type_filter = "muscle_growth" if user_objective == "muscle" else user_objective
+
+                    recommended = await db_queries.get_recommended_exercises(
+                        conn=conn,
+                        fitness_level=user_data["fitness_level"],
+                        focus_area_ids=p_focus_area_ids,
+                        equipment_ids=p_equipment_ids,
+                        health_issue_ids=p_health_issue_ids,
+                        exercises_per_focus=exercises_per_focus,
+                        total_limit=50,
+                        objective=exercise_type_filter,
+                    )
+
+                    primary_focus_by_exercise = {
+                        rec["id"]: rec.get("primary_focus_area") for rec in recommended
+                    }
+        except Exception:
+            # If anything goes wrong, fall back to DB primary_focus_area.
+            primary_focus_by_exercise = {}
+
     # Helper mappers (prefer custom values over generated for same exercise_id)
     def map_from_generated(r: Any) -> Dict[str, Any]:
         return {
@@ -1791,7 +1877,11 @@ async def get_combined_exercises(
             "name": r["name"],
             "description": r.get("description"),
             "video_url": r.get("video_url"),
-            "primary_focus_area": r.get("primary_focus_area"),
+            "primary_focus_area": primary_focus_by_exercise.get(
+                r["exercise_id"], r.get("primary_focus_area")
+            ),
+            "pro_tip": r.get("pro_tip"),
+            "muscle_groups": parse_muscle_groups(r.get("muscle_groups")),
             "weight_kg": float(r["weight_kg"]) if r.get("weight_kg") is not None else 0.0,
             "reps": r.get("reps", 12),
             "sets": r.get("sets", 3),
@@ -1807,6 +1897,8 @@ async def get_combined_exercises(
             "description": r.get("description"),
             "video_url": r.get("video_url"),
             "primary_focus_area": r.get("primary_focus_area"),
+            "pro_tip": r.get("pro_tip"),
+            "muscle_groups": parse_muscle_groups(r.get("muscle_groups")),
             "weight_kg": float(r.get("weight_kg", 0.0)),
             "reps": r.get("reps", 12),
             "sets": r.get("sets", 3),

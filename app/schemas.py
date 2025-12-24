@@ -465,6 +465,8 @@ class ExerciseItem(BaseModel):
     description: Optional[str] = None
     video_url: Optional[str] = None
     image_url: Optional[str] = None
+    pro_tip: Optional[str] = None
+    muscle_groups: Optional[Dict[str, Any]] = None
     focus_areas: List[ExerciseFocusArea] = []
 
 class ExercisesListResponse(BaseModel):

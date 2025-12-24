@@ -102,7 +102,7 @@ async def get_user_custom_exercises(conn: asyncpg.Connection, user_id: int) -> L
         List of custom exercise dictionaries.
     """
     query = """
-    SELECT uce.id, uce.exercise_id, e.name, e.description, e.video_url,
+    SELECT uce.id, uce.exercise_id, e.name, e.description, e.pro_tip, e.muscle_groups, e.video_url,
            fa.name as primary_focus_area, uce.weight_kg, uce.reps, uce.sets,
            uce.one_rm_calculated, uce.added_at, uce.updated_at
     FROM user_custom_exercises uce
@@ -120,6 +120,8 @@ async def get_user_custom_exercises(conn: asyncpg.Connection, user_id: int) -> L
             'exercise_id': row['exercise_id'],
             'name': row['name'],
             'description': row['description'],
+            'pro_tip': row['pro_tip'],
+            'muscle_groups': row['muscle_groups'],
             'video_url': build_exercise_video_url(row['video_url']),
             'primary_focus_area': row['primary_focus_area'],
             'weight_kg': float(row['weight_kg']),

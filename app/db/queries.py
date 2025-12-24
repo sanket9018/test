@@ -306,6 +306,8 @@ async def fetch_all_exercises(conn: asyncpg.Connection):
         e.id,
         e.name,
         e.description,
+        e.pro_tip,
+        e.muscle_groups,
         e.video_url,
         e.image_url,
         json_agg(
@@ -317,7 +319,7 @@ async def fetch_all_exercises(conn: asyncpg.Connection):
     FROM exercises e
     LEFT JOIN exercise_focus_areas efa ON e.id = efa.exercise_id
     LEFT JOIN focus_areas fa ON efa.focus_area_id = fa.id
-    GROUP BY e.id, e.name, e.description, e.video_url, e.image_url
+    GROUP BY e.id, e.name, e.description, e.pro_tip, e.muscle_groups, e.video_url, e.image_url
     ORDER BY e.id;
     """
     return await conn.fetch(query)
@@ -1113,6 +1115,8 @@ async def get_user_generated_exercises(conn: asyncpg.Connection, user_id: int) -
         uge.exercise_id,
         e.name,
         e.description,
+        e.pro_tip,
+        e.muscle_groups,
         e.video_url,
         fa.name as primary_focus_area,
         uge.weight_kg,
@@ -1220,6 +1224,8 @@ async def get_user_routine_day_exercises(conn: asyncpg.Connection, user_id: int)
         urde.exercise_id,
         e.name,
         e.description,
+        e.pro_tip,
+        e.muscle_groups,
         e.video_url,
         fa.name as primary_focus_area,
         urde.order_in_day,
