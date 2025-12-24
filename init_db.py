@@ -232,8 +232,12 @@ def generate_schema_sql():
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL UNIQUE,
         description TEXT,
+        pro_tip TEXT,
         video_url VARCHAR(255),
         image_url VARCHAR(255),
+        muscle_groups TEXT,
+        category VARCHAR(100),
+        is_femal BOOLEAN DEFAULT FALSE,
         exercise_type exercise_type_enum,
         primary_focus_area_id INTEGER REFERENCES focus_areas(id), 
         is_high_impact BOOLEAN DEFAULT FALSE
@@ -553,105 +557,174 @@ def generate_schema_sql():
     INSERT INTO focus_areas (name) VALUES ('Chest'), ('Back'), ('Arms'), ('Shoulders'), ('Abs'), ('Legs'), ('Glutes'), ('Full Body'), ('Hips'), ('Thighs'), ('Calves'), ('Forearms'), ('Waist'), ('Biceps'), ('Triceps');
     INSERT INTO health_issues (name, description) VALUES ('None', 'No health issues.'), ('Post-COVID Recovery', 'Avoid high-intensity exercises.'), ('Cannot Jump', 'Avoid high-impact exercises.'), ('Back or Hernia', 'Avoid heavy spinal loading.'), ('Knee Pain', 'Avoid deep squats and lunges.'), ('No medical issues', 'No medical issues.'), ('Back pain', 'Avoid heavy spinal loading and exercises that aggravate pain.'), ('Knee or joint pain', 'Avoid deep squats, lunges, and high-impact moves.'), ('Heart condition', 'Avoid high-intensity workouts; consult a physician.'), ('Diabetes', 'Monitor blood sugar; avoid extreme intensity.'), ('Asthma / breathing issues', 'Avoid high-intensity cardio; monitor breathing.') ON CONFLICT (name) DO NOTHING;
     
-    -- Insert equipment types and equipment hierarchy (Your existing code is fine)
-    INSERT INTO equipment_types (name) VALUES ('Bodyweight'), ('Household Items'), ('Free Weights'), ('Benches'), ('Racks'), ('Bars'), ('Bands'), ('Cable machines'), ('Cable Attachments'), ('Weight Machines'), ('Other');
+    -- Insert equipment types and equipment hierarchy 
+    INSERT INTO equipment_types (name) VALUES
+        ('Bodyweight'),
+        ('Household Items'),
+        ('Free Weights'),
+        ('Benches'),
+        ('Racks'),
+        ('Bars'),
+        ('Bands'),
+        ('Cable Machines'),
+        ('Cable Attachments'),
+        ('Weight Machines'),
+        ('Other');
     INSERT INTO equipment (name, equipment_type_id) VALUES
+        -- Bodyweight
         ('Bodyweight', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
-        ('Bodyweight Only', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Captain''s Chair', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Dip Station', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Gymnastic Rings', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Parallel Bars', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Parallettes', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Pull-Up Bar', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Push Up Bar', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Stall Bar', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Sturdy Support', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Support Bar', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Suspension Trainer', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        ('Wall', (SELECT id FROM equipment_types WHERE name = 'Bodyweight')),
+        
+        -- Household Items
         ('Chair', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
-        
-        -- Benches
-        ('Flat Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Box', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
-        ('Decline Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Steps', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
-        ('Stability Ball', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
-        ('Back Extension Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        
-        -- Cable Attachments
-        ('Handles', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Handle', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Rope', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        
-        -- Machines
-        ('Seated Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Leg Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Leg Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Hack Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Sled', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Push Up Bar', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Squat Rack', (SELECT id FROM equipment_types WHERE name = 'Racks')),
-        ('Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        
-        -- Other
-        ('Sliders', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Cone', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Exercise Mat', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Foam Roller', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Knee Pad', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
         ('Large Textbook', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
-        ('Stick', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Sliders', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Step/Box/Platform', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Stick/Dowel', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Table', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
         ('Towel', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        ('Yoga Block', (SELECT id FROM equipment_types WHERE name = 'Household Items')),
+        
+        -- Free Weights
+        ('Ankle Weights', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
         ('Barbell', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
         ('Dumbbells', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
         ('Kettlebells', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
-        ('EZ Bar', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
-        ('Hammer Curl Bar', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
-        ('Weight Plate', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
-        ('Decline Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Decline Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Flat Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Flat Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Incline (Adjustable) Bench Without Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Incline Bench With Rack', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Medicine Ball', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
+        ('Weight Belt', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
+        ('Weight Plates', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
+        ('Weighted Vest', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
+        ('Wrist Roller', (SELECT id FROM equipment_types WHERE name = 'Free Weights')),
+        
+        -- Benches
+        ('Adjustable Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Chest Support Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Decline Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Flat Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Hyperextension Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
         ('Incline Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Preacher Curl Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
-        ('Vertical Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Incline Sit-up Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Nordic Curl Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        ('Preacher Bench', (SELECT id FROM equipment_types WHERE name = 'Benches')),
+        
+        -- Racks
         ('Dumbbell Rack', (SELECT id FROM equipment_types WHERE name = 'Racks')),
-        ('Squat Rack Or Power Rack', (SELECT id FROM equipment_types WHERE name = 'Racks')),
-        ('Dip Bars', (SELECT id FROM equipment_types WHERE name = 'Bars')),
-        ('Padded Parallel Bars', (SELECT id FROM equipment_types WHERE name = 'Bars')),
-        ('Pull Up Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
-        ('Handle Band', (SELECT id FROM equipment_types WHERE name = 'Bands')),
-        ('Mini Loop Band', (SELECT id FROM equipment_types WHERE name = 'Bands')),
-        ('Close Pulley Towers', (SELECT id FROM equipment_types WHERE name = 'Cable machines')),
-        ('Far Pulley Towers', (SELECT id FROM equipment_types WHERE name = 'Cable machines')),
-        ('Lat Pulldown', (SELECT id FROM equipment_types WHERE name = 'Cable machines')),
-        ('Seated Row', (SELECT id FROM equipment_types WHERE name = 'Cable machines')),
-        ('Single Pulley Tower', (SELECT id FROM equipment_types WHERE name = 'Cable machines')),
-        ('Ankle Cuff', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Curl Bar', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Lat Bar', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Push Down Bar', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Power Rack', (SELECT id FROM equipment_types WHERE name = 'Racks')),
+        
+        -- Bars
+        ('Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('EZ Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Lat Pulldown Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Light Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Safety Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Straight Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Sturdy Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Trap Bar', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        ('Viking Press Handle', (SELECT id FROM equipment_types WHERE name = 'Bars')),
+        
+        -- Bands
+        ('Resistance Bands', (SELECT id FROM equipment_types WHERE name = 'Bands')),
+        ('Battle Ropes', (SELECT id FROM equipment_types WHERE name = 'Bands')),
+        ('Chains', (SELECT id FROM equipment_types WHERE name = 'Bands')),
+        
+        -- Cable Machines
+        ('Cable Crossover Machine', (SELECT id FROM equipment_types WHERE name = 'Cable Machines')),
+        ('Cable Machine', (SELECT id FROM equipment_types WHERE name = 'Cable Machines')),
+        ('Lat Pulldown Machine', (SELECT id FROM equipment_types WHERE name = 'Cable Machines')),
+        ('Seated Row Machine', (SELECT id FROM equipment_types WHERE name = 'Cable Machines')),
+        ('Single Pulley Tower', (SELECT id FROM equipment_types WHERE name = 'Cable Machines')),
+        
+        -- Cable Attachments
+        ('Ab Straps', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Anchor Point', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Ankle Straps', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Barbell Pad', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('D-Handle', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Hamstring Curl Attachment', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Handles', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Head Harness', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Landmine Attachment', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
         ('Rope Attachment', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Row Handle', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Single Grip Handles', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Straight Bar', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Shoulder Pad Attachment', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
+        ('Single Handle', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
         ('V-Bar', (SELECT id FROM equipment_types WHERE name = 'Cable Attachments')),
-        ('Assisted Weight Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        
+        -- Weight Machines
+        ('Ab Coaster Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Ab Crunch Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Assisted Pull-up/Dip Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Back Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Calf Raise Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Belt Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Bicep Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Calf Raise Machine (Plate-Loaded)', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Chest Fly Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Chest Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Fly Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Glute Kickback Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('High Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Hack Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Hip Abduction Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Hip Adduction Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Hip Thrust Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Incline Chest Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Lat Pulldown Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Lateral Raise Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Lying Crunch Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leg Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leg Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leg Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Lever Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Lever Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Lever Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Leverage Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Pec Deck Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Plate-Loaded Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Preacher Curl Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Seated Crunch Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Shoulder Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Reverse Hyperextension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Seated Calf Raise Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Seated Shoulder Press Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Sissy Squat Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
         ('Smith Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('T - Bar', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
-        ('Tricep Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Standing Calf Raise Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('T-Bar Row Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Torso Rotation Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        ('Triceps Extension Machine', (SELECT id FROM equipment_types WHERE name = 'Weight Machines')),
+        
+        -- Other
         ('Ab Wheel', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Battle Ropes', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Landmine Holder', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Slider', (SELECT id FROM equipment_types WHERE name = 'Other')),
-        ('Stability (swiss) Ball', (SELECT id FROM equipment_types WHERE name = 'Other'));
-
-    -- Seeding Routines and their default day/focus area structures (Your existing code is fine)
+        ('Air Bike', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Air Walker Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Blocks', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Boards', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Bosu Ball', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Calf Raise Block', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Elliptical Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('GHD Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Pilates Reformer', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Rowing Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('SkiErg Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Slant Board', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Sled', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Squat Wedge', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Stability Ball', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Stair Climber Machine', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Stationary Bike', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Treadmill', (SELECT id FROM equipment_types WHERE name = 'Other')),
+        ('Upper Body Ergometer', (SELECT id FROM equipment_types WHERE name = 'Other'));
+    
+    -- Seeding Routines and their default day/focus area structures 
     WITH routine AS (INSERT INTO routines (name) VALUES ('3 Day Classic') RETURNING id),
          day1 AS (INSERT INTO routine_days (routine_id, day_number) SELECT id, 1 FROM routine RETURNING id),
          day2 AS (INSERT INTO routine_days (routine_id, day_number) SELECT id, 2 FROM routine RETURNING id),
@@ -701,7 +774,7 @@ def generate_schema_sql():
 
 def generate_dynamic_exercises_sql(valid_equipment_names: set):
     """
-    Generate only the dynamic exercise INSERT statements from excercise1.json.
+    Generate only the dynamic exercise INSERT statements from consolidated_dataset 2.json.
     This runs after schema is applied so FK lookups (focus_areas, equipment, etc.) exist.
     """
     import json
@@ -711,7 +784,7 @@ def generate_dynamic_exercises_sql(valid_equipment_names: set):
             return ""
         return text.replace("'", "''")
 
-    json_path = os.path.join(os.path.dirname(__file__), 'excercise1.json')
+    json_path = os.path.join(os.path.dirname(__file__), 'consolidated_dataset 2.json')
     with open(json_path, 'r', encoding='utf-8') as f:
         exercise_data = json.load(f)
 
@@ -724,12 +797,22 @@ def generate_dynamic_exercises_sql(valid_equipment_names: set):
             continue
         processed_exercise_names.add(ex_name)
 
-        ex_desc = sql_escape(ex.get('desc', ''))
+        # Serialize rich text/structured fields as JSON strings so they can be stored as TEXT
+        ex_desc = sql_escape(json.dumps(ex.get('description', [])))
+        ex_pro_tip = sql_escape(ex.get('pro_tip', ''))
+        ex_muscle_groups = sql_escape(json.dumps(ex.get('muscle_groups', {})))
+        ex_category = sql_escape(ex.get('category', ''))
 
         # Prefer Muscle Growth over Strength Training when both are present,
         # so hypertrophy-focused exercises are available for the 'muscle' objective.
         type_mapping = {"Strength Training": "strength", "Muscle Growth": "muscle_growth", "Calorie Burning": "cardio"}
-        json_types = ex.get('type', [])
+        json_type_raw = ex.get('type')
+        if isinstance(json_type_raw, list):
+            json_types = json_type_raw
+        elif isinstance(json_type_raw, str):
+            json_types = [json_type_raw]
+        else:
+            json_types = []
 
         # Default to strength but override if Muscle Growth is explicitly present.
         ex_type = 'strength'
@@ -741,46 +824,84 @@ def generate_dynamic_exercises_sql(valid_equipment_names: set):
                     ex_type = type_mapping[t]
                     break
 
-        ex_impact = ex.get('is_high_impact', False)
-        primary_focus_area_name = sql_escape(ex['focus_areas'][0]) if ex.get('focus_areas') else 'Full Body'
+        ex_impact = bool(ex.get('is_high_impact', False))
 
-        # Handle combined equipment names like "Barbell/Dumbbells"
-        raw_equipment = ex.get('equipment', [])
+        # Focus areas: new key is `focus_area`, but fall back to old `focus_areas` if present
+        focus_areas = ex.get('focus_area') or ex.get('focus_areas') or []
+        primary_focus_area_name = sql_escape(focus_areas[0]) if focus_areas else 'Full Body'
+
+        # Handle equipment using new `equipments` field.
+        # First try full name match (for canonical names like "Step/Box/Platform"),
+        # then fall back to splitting on '/' for legacy combined names.
+        raw_equipment = ex.get('equipments', [])
         processed_equipment = set()
         for item in raw_equipment:
-            parts = [p.strip() for p in item.split('/')]
+            item = item.strip()
+            if item in valid_equipment_names:
+                processed_equipment.add(item)
+                continue
+            parts = [p.strip() for p in item.split('/') if p.strip()]
             for part in parts:
                 if part in valid_equipment_names:
                     processed_equipment.add(part)
 
-        ex_video_url = sql_escape(ex.get('video_url', ''))
-        ex_image_url = sql_escape(ex.get('image_url', ''))
+        # Media and gender flags
+        # Store the JSON `id` as image_url, and `video_path` as video_url.
+        ex_image_url = sql_escape(ex.get('id', ''))
+        ex_video_url = sql_escape(ex.get('video_path', ''))
+        is_femal_flag = 'TRUE' if ex.get('matching_female') or ex.get('female_path') else 'FALSE'
 
         with_clauses = [
-            f"new_exercise AS (INSERT INTO exercises (name, description, video_url, image_url, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', NULLIF('{ex_video_url}', ''), NULLIF('{ex_image_url}', ''), '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"
+            f"new_exercise AS (INSERT INTO exercises (name, description, pro_tip, video_url, image_url, muscle_groups, category, is_femal, exercise_type, is_high_impact, primary_focus_area_id) VALUES ('{ex_name}', '{ex_desc}', NULLIF('{ex_pro_tip}', ''), NULLIF('{ex_video_url}', ''), NULLIF('{ex_image_url}', ''), NULLIF('{ex_muscle_groups}', ''), NULLIF('{ex_category}', ''), {is_femal_flag}, '{ex_type}', {ex_impact}, (SELECT id FROM focus_areas WHERE name = '{primary_focus_area_name}')) RETURNING id)"
         ]
 
+        # Difficulty information: new JSON uses `difficulty_level` (single value),
+        # but support old `difficulty_levels` list if present.
+        difficulty_levels = []
         if ex.get('difficulty_levels'):
-            difficulty_selects = [f"SELECT id, '{level.lower()}'::fitness_level_enum FROM new_exercise" for level in ex['difficulty_levels']]
-            with_clauses.append(f"ins_difficulty AS (INSERT INTO exercise_fitness_levels (exercise_id, fitness_level) {' UNION ALL '.join(difficulty_selects)})")
+            difficulty_levels = ex['difficulty_levels']
+        elif ex.get('difficulty_level'):
+            difficulty_levels = [ex['difficulty_level']]
 
-        if ex.get('focus_areas'):
+        if difficulty_levels:
+            difficulty_selects = [
+                f"SELECT id, '{level.lower()}'::fitness_level_enum FROM new_exercise" for level in difficulty_levels
+            ]
+            with_clauses.append(
+                f"ins_difficulty AS (INSERT INTO exercise_fitness_levels (exercise_id, fitness_level) {' UNION ALL '.join(difficulty_selects)})"
+            )
+
+        if focus_areas:
             focus_area_selects = []
-            for i, area in enumerate(ex['focus_areas']):
+            for i, area in enumerate(focus_areas):
                 is_primary = 'TRUE' if i == 0 else 'FALSE'
-                focus_area_selects.append(f"SELECT id, (SELECT id FROM focus_areas WHERE name = '{sql_escape(area)}'), {is_primary} FROM new_exercise")
-            with_clauses.append(f"ins_focus_areas AS (INSERT INTO exercise_focus_areas (exercise_id, focus_area_id, is_primary) {' UNION ALL '.join(focus_area_selects)})")
+                focus_area_selects.append(
+                    f"SELECT id, (SELECT id FROM focus_areas WHERE name = '{sql_escape(area)}'), {is_primary} FROM new_exercise"
+                )
+            with_clauses.append(
+                f"ins_focus_areas AS (INSERT INTO exercise_focus_areas (exercise_id, focus_area_id, is_primary) {' UNION ALL '.join(focus_area_selects)})"
+            )
 
         if processed_equipment:
             equipment_selects = []
             for equip_name in processed_equipment:
-                equipment_selects.append(f"SELECT (SELECT id FROM new_exercise), (SELECT id FROM equipment WHERE name = '{equip_name}')")
+                safe_equip_name = sql_escape(equip_name)
+                equipment_selects.append(
+                    f"SELECT (SELECT id FROM new_exercise), (SELECT id FROM equipment WHERE name = '{safe_equip_name}')"
+                )
             if equipment_selects:
-                with_clauses.append(f"ins_equipment AS (INSERT INTO exercise_equipment (exercise_id, equipment_id) {' UNION ALL '.join(equipment_selects)})")
+                with_clauses.append(
+                    f"ins_equipment AS (INSERT INTO exercise_equipment (exercise_id, equipment_id) {' UNION ALL '.join(equipment_selects)})"
+                )
 
+        # New dataset may not include contraindications, but keep this logic for compatibility
         if ex.get('contraindications'):
-            contra_selects = [f"SELECT id, (SELECT id FROM health_issues WHERE name = '{sql_escape(issue)}') FROM new_exercise" for issue in ex['contraindications']]
-            with_clauses.append(f"ins_contra AS (INSERT INTO exercise_contraindications (exercise_id, health_issue_id) {' UNION ALL '.join(contra_selects)})")
+            contra_selects = [
+                f"SELECT id, (SELECT id FROM health_issues WHERE name = '{sql_escape(issue)}') FROM new_exercise" for issue in ex['contraindications']
+            ]
+            with_clauses.append(
+                f"ins_contra AS (INSERT INTO exercise_contraindications (exercise_id, health_issue_id) {' UNION ALL '.join(contra_selects)})"
+            )
 
         full_statement = "WITH " + ",\n".join(with_clauses) + "\nSELECT 1;"
         insert_commands.append(full_statement)
