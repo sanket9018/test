@@ -1,6 +1,7 @@
 import asyncpg
 from typing import Optional, Dict, List, Any
 import random
+from app.s3 import build_exercise_video_url
 
 async def add_custom_exercise(conn: asyncpg.Connection, user_id: int, exercise_id: int) -> Optional[Dict]:
     """
@@ -81,7 +82,7 @@ async def add_custom_exercise(conn: asyncpg.Connection, user_id: int, exercise_i
                 'exercise_id': exercise_id,
                 'name': exercise_data['name'],
                 'description': exercise_data['description'],
-                'video_url': exercise_data['video_url'],
+                'video_url': build_exercise_video_url(exercise_data['video_url']),
                 'primary_focus_area': exercise_data['primary_focus_area'],
                 'weight_kg': weight_kg,
                 'reps': reps,
@@ -119,7 +120,7 @@ async def get_user_custom_exercises(conn: asyncpg.Connection, user_id: int) -> L
             'exercise_id': row['exercise_id'],
             'name': row['name'],
             'description': row['description'],
-            'video_url': row['video_url'],
+            'video_url': build_exercise_video_url(row['video_url']),
             'primary_focus_area': row['primary_focus_area'],
             'weight_kg': float(row['weight_kg']),
             'reps': row['reps'],

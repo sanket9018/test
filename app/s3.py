@@ -251,3 +251,38 @@ def delete_user_images(user_id: int) -> bool:
     except Exception as e:
         logger.error(f"Error deleting user images: {e}")
         return False
+
+
+# === Exercise media URL helpers (for consolidated_dataset-driven exercises) ===
+
+# These helpers convert the IDs / filenames stored in the DB into S3 object keys
+# and then generate **presigned URLs** so the client can access private media.
+
+EXERCISE_IMAGE_KEY_PREFIX = "Male/thumbnails/"
+EXERCISE_VIDEO_KEY_PREFIX = "Male/"
+
+
+def build_exercise_image_url(image_id: Optional[str], expiration: int = 3600) -> Optional[str]:
+    """Build presigned image URL from stored image_id (UUID string).
+
+    DB stores only the raw ID, e.g. "000b15e5-e0a7-4663-9d63-e795978fd6e4".
+    S3 object key is:  Male/thumbnails/{id}.jpg
+    This returns a time-limited presigned URL for that object.
+    """
+    if not image_id:
+        return None
+    s3_key = f"{EXERCISE_IMAGE_KEY_PREFIX}{image_id}.jpg"
+    return s3_manager.get_presigned_url(s3_key, expiration)
+
+
+def build_exercise_video_url(video_filename: Optional[str], expiration: int = 3600) -> Optional[str]:
+    """Build presigned video URL from stored video filename.
+
+    DB stores values like "000b15e5-e0a7-4663-9d63-e795978fd6e4.mp4".
+    S3 object key is:  Male/{filename}
+    This returns a time-limited presigned URL for that object.
+    """
+    if not video_filename:
+        return None
+    s3_key = f"{EXERCISE_VIDEO_KEY_PREFIX}{video_filename}"
+    return s3_manager.get_presigned_url(s3_key, expiration)

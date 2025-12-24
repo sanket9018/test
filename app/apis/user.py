@@ -13,7 +13,14 @@ import jwt
 from app.helpers.token import get_access_token_from_header
 from fastapi import  Request
 import json
-from app.s3 import upload_profile_image, get_image_url, delete_image, get_presigned_image_url
+from app.s3 import (
+    upload_profile_image,
+    get_image_url,
+    delete_image,
+    get_presigned_image_url,
+    build_exercise_image_url,
+    build_exercise_video_url,
+)
 
 
 router = APIRouter()
@@ -762,7 +769,21 @@ async def generate_workout_plan(
     if not storage_success:
         print(f"Warning: Failed to store generated exercises for user {user_id}")
     
-    return [dict(record) for record in final_exercises]
+    # Build response with fully-qualified media URLs
+    response_exercises: List[ExerciseResponse] = []
+    for record in final_exercises:
+        response_exercises.append(
+            ExerciseResponse(
+                id=record["id"],
+                name=record["name"],
+                description=record.get("description"),
+                video_url=build_exercise_video_url(record.get("video_url")),
+                image_url=build_exercise_image_url(record.get("image_url")),
+                primary_focus_area=record.get("primary_focus_area", ""),
+            )
+        )
+
+    return response_exercises
 
 
 @router.get("/me/workout/status", response_model=WorkoutDayStatusResponse)
@@ -910,8 +931,9 @@ async def get_all_exercises(
                 id=record['id'],
                 name=record['name'],
                 description=record.get('description'),
-                video_url=record.get('video_url'),
-                focus_areas=focus_areas
+                video_url=build_exercise_video_url(record.get('video_url')),
+                image_url=build_exercise_image_url(record.get('image_url')),
+                focus_areas=focus_areas,
             ))
         
         return ExercisesListResponse(exercises=exercises)
