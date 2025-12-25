@@ -177,7 +177,7 @@ class S3Manager:
             logger.error(f"Error generating image URL: {e}")
             return None
     
-    def get_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
+    def get_presigned_url(self, s3_key: str, expiration: int = 604000) -> Optional[str]:
         """
         Generate presigned URL for private S3 object
         Returns: Presigned URL if successful, None if failed
@@ -222,7 +222,7 @@ def get_image_url(s3_key: str) -> Optional[str]:
     """Get public URL for S3 image"""
     return s3_manager.get_image_url(s3_key)
 
-def get_presigned_image_url(s3_key: str, expiration: int = 3600) -> Optional[str]:
+def get_presigned_image_url(s3_key: str, expiration: int = 604000) -> Optional[str]:
     """Get presigned URL for S3 image"""
     return s3_manager.get_presigned_url(s3_key, expiration)
 
@@ -262,7 +262,7 @@ EXERCISE_IMAGE_KEY_PREFIX = "Male/thumbnails/"
 EXERCISE_VIDEO_KEY_PREFIX = "Male/"
 
 
-def build_exercise_image_url(image_id: Optional[str], expiration: int = 3600) -> Optional[str]:
+def build_exercise_image_url(image_id: Optional[str], expiration: int = 604000) -> Optional[str]:
     """Build presigned image URL from stored image_id (UUID string).
 
     DB stores only the raw ID, e.g. "000b15e5-e0a7-4663-9d63-e795978fd6e4".
@@ -275,7 +275,7 @@ def build_exercise_image_url(image_id: Optional[str], expiration: int = 3600) ->
     return s3_manager.get_presigned_url(s3_key, expiration)
 
 
-def build_exercise_video_url(video_filename: Optional[str], expiration: int = 3600) -> Optional[str]:
+def build_exercise_video_url(video_filename: Optional[str], expiration: int = 604000) -> Optional[str]:
     """Build presigned video URL from stored video filename.
 
     DB stores values like "000b15e5-e0a7-4663-9d63-e795978fd6e4.mp4".
