@@ -75,6 +75,7 @@ class UserOnboardingCreate(BaseModel):
     
     # Objective can be one of: muscle (maps to muscle_growth), strength, cardio
     objective: str = Field(...) 
+    duration: Optional[int] = Field(1)
     
     motivations: List[str]
     goals: List[str]

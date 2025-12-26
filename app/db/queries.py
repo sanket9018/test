@@ -48,10 +48,10 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         INSERT INTO users (
             name, email, password_hash, gender, age, height_cm, 
             current_weight_kg, target_weight_kg, fitness_level, 
-            activity_level, workouts_per_week, motivation, goal, days
+            activity_level, workouts_per_week, motivation, goal, days, duration
         ) VALUES (
             $1, $2, $3, $4::gender_enum, $5, $6, $7, $8, 
-            $9::fitness_level_enum, $10::activity_level_enum, $11, $12, $13, $14
+            $9::fitness_level_enum, $10::activity_level_enum, $11, $12, $13, $14, $15
         ) RETURNING id, created_at, updated_at;
     """
     return await conn.fetchrow(
@@ -69,7 +69,8 @@ async def insert_user(conn: asyncpg.Connection, user_data: Dict) -> asyncpg.Reco
         user_data['workouts_per_week'],
         user_data.get('motivation'),
         user_data.get('goal'),
-        user_data.get('days')
+        user_data.get('days'),
+        user_data.get('duration', 1)
     )
 
 # This function is correct and essential for the new flow.

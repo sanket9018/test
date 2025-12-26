@@ -20,6 +20,8 @@ from app.s3 import (
     get_presigned_image_url,
     build_exercise_image_url,
     build_exercise_video_url,
+    delete_multiple_images,
+    s3_manager,
 )
 
 
@@ -48,6 +50,10 @@ async def create_user(
                 'motivations', 'goals'
             })
             user_dict['password_hash'] = hashed_password
+            try:
+                user_dict['duration'] = int(user_data.duration) if user_data.duration is not None else 1
+            except Exception:
+                user_dict['duration'] = 1
             
             # Serialize lists to JSON strings for DB storage
             user_dict['motivation'] = json.dumps(user_data.motivations) if user_data.motivations else None
@@ -3550,4 +3556,63 @@ async def remove_exercise_exclusion(
             detail=f"Failed to remove exercise exclusion: {str(e)}"
         )
 
+
+
+@router.delete("/user/me")
+async def delete_my_account(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_db)
+):
+    """
+    Delete the authenticated user's account and all related data.
+    This leverages ON DELETE CASCADE across the schema to remove linked rows.
+    Also attempts to remove user-owned S3 assets (profile and transactions images).
+    """
+    # Authenticate user
+    access_token = await get_access_token_from_header(request)
+    token_entry = await db_queries.fetch_access_token(conn, access_token)
+    if not token_entry:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    user_id = token_entry['user_id']
+
+    # Collect S3 keys to delete (profile image key and any objects under known prefixes)
+    profile_key = await conn.fetchval("SELECT profile_image_key FROM users WHERE id = $1", user_id)
+    keys_to_delete: list[str] = []
+    try:
+        prefixes = [f"profile_pic/{user_id}/", f"transactions/{user_id}/"]
+        for prefix in prefixes:
+            try:
+                resp = s3_manager.s3_client.list_objects_v2(
+                    Bucket=s3_manager.bucket_name,
+                    Prefix=prefix,
+                )
+                if 'Contents' in resp:
+                    keys_to_delete.extend([obj['Key'] for obj in resp['Contents']])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if profile_key and profile_key not in keys_to_delete:
+        keys_to_delete.append(profile_key)
+
+    # Delete the user (cascades to all related data)
+    async with conn.transaction():
+        await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+
+    # Best-effort S3 cleanup (do not fail the request if S3 deletion fails)
+    if keys_to_delete:
+        try:
+            delete_multiple_images(keys_to_delete)
+        except Exception:
+            try:
+                for key in keys_to_delete:
+                    try:
+                        delete_image(key)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    return {"message": "Account and all related data deleted successfully.", "deleted": True}
 
